@@ -1,0 +1,218 @@
+
+        .page-admin-view * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        .page-admin-view {
+            font-family: 'Inter', sans-serif;
+            background: #0a0f1e;
+            color: #ffffff;
+            min-height: 100vh;
+            width: 100%;
+            overflow: auto;
+        }
+        
+        .page-admin-view .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        
+        .page-admin-view .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #7DFF6A;
+            text-decoration: none;
+            margin-bottom: 20px;
+            transition: color 0.3s ease;
+        }
+        
+        .page-admin-view .back-link:hover {
+            color: #5ae04a;
+        }
+        
+        .page-admin-view .card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(125, 255, 106, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 25px;
+        }
+        
+        .page-admin-view .card h2 {
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        
+        .page-admin-view .card h2 i {
+            color: #7DFF6A;
+            margin-right: 10px;
+        }
+        
+        .page-admin-view .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .page-admin-view .detail-item {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 10px;
+        }
+        
+        .page-admin-view .detail-item .label {
+            color: #8a9bb5;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .page-admin-view .detail-item .value {
+            font-weight: 500;
+            margin-top: 4px;
+        }
+        
+        .page-admin-view .detail-item.full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .page-admin-view .status-badge {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            display: inline-block;
+        }
+        
+        .page-admin-view .status-badge.submitted {
+            background: rgba(249, 184, 74, 0.2);
+            color: #f9b84a;
+        }
+        
+        .page-admin-view .status-badge.verified {
+            background: rgba(52, 152, 219, 0.2);
+            color: #3498db;
+        }
+        
+        .page-admin-view .status-badge.in-progress {
+            background: rgba(125, 255, 106, 0.2);
+            color: #7DFF6A;
+        }
+        
+        .page-admin-view .status-badge.resolved {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+        
+        .page-admin-view .status-badge.rejected {
+            background: rgba(255, 82, 82, 0.2);
+            color: #ff6b6b;
+        }
+        
+        .page-admin-view .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .page-admin-view .form-group label {
+            display: block;
+            color: #d6e4ff;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        
+        .page-admin-view .form-group select, .page-admin-view .form-group textarea {
+            width: 100%;
+            padding: 12px 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(125, 255, 106, 0.1);
+            border-radius: 10px;
+            color: #ffffff;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.3s ease;
+        }
+        
+        .page-admin-view .form-group select:focus, .page-admin-view .form-group textarea:focus {
+            outline: none;
+            border-color: #7DFF6A;
+        }
+        
+        .page-admin-view .form-group select option {
+            background: #1a2a3a;
+            color: #ffffff;
+        }
+        
+        .page-admin-view .btn-primary {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #7DFF6A, #4CAF50);
+            border: none;
+            border-radius: 10px;
+            color: #0a0f1e;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+        
+        .page-admin-view .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(125, 255, 106, 0.3);
+        }
+        
+        .page-admin-view .alert {
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .page-admin-view .alert-success {
+            background: rgba(46, 204, 113, 0.1);
+            border: 1px solid rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+        
+        .page-admin-view .alert-error {
+            background: rgba(255, 82, 82, 0.1);
+            border: 1px solid rgba(255, 82, 82, 0.2);
+            color: #ff6b6b;
+        }
+        
+        .page-admin-view .evidence-item {
+            display: inline-block;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .page-admin-view .evidence-item i {
+            color: #7DFF6A;
+            margin-right: 8px;
+        }
+        
+        .page-admin-view .evidence-item a {
+            color: #ffffff;
+            text-decoration: none;
+        }
+        
+        .page-admin-view .evidence-item a:hover {
+            color: #7DFF6A;
+        }
+        
+        @media (max-width: 768px) {
+
+            .page-admin-view .detail-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .page-admin-view .card {
+                padding: 20px;
+            }
+        
+}
+    

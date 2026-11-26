@@ -1,0 +1,138 @@
+
+        .page-admin-complaints * { margin: 0; padding: 0; box-sizing: border-box; }
+        .page-admin-complaints {
+            font-family: 'Inter', sans-serif;
+            background: #0a0f1e;
+            color: #ffffff;
+            min-height: 100vh;
+            width: 100%;
+            overflow: auto;
+        }
+        .page-admin-complaints .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
+        .page-admin-complaints .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .page-admin-complaints .header h1 { font-size: 28px; }
+        .page-admin-complaints .header h1 span { color: #7DFF6A; }
+        .page-admin-complaints .back-link {
+            color: #7DFF6A;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .page-admin-complaints .back-link:hover { color: #5ae04a; }
+        
+        .page-admin-complaints .filters {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .page-admin-complaints .filter-btn {
+            padding: 8px 20px;
+            border: 1px solid rgba(125, 255, 106, 0.1);
+            border-radius: 20px;
+            background: transparent;
+            color: #8a9bb5;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .page-admin-complaints .filter-btn:hover, .page-admin-complaints .filter-btn.active {
+            background: rgba(125, 255, 106, 0.1);
+            border-color: #7DFF6A;
+            color: #7DFF6A;
+        }
+        .page-admin-complaints .search-box {
+            display: flex;
+            gap: 10px;
+        }
+        .page-admin-complaints .search-box input {
+            padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(125, 255, 106, 0.1);
+            border-radius: 10px;
+            color: #ffffff;
+            min-width: 200px;
+        }
+        .page-admin-complaints .search-box input:focus {
+            outline: none;
+            border-color: #7DFF6A;
+        }
+        .page-admin-complaints .search-box button {
+            padding: 10px 20px;
+            background: #7DFF6A;
+            border: none;
+            border-radius: 10px;
+            color: #0a0f1e;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        .page-admin-complaints .table-container {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(125, 255, 106, 0.05);
+            border-radius: 16px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+        .page-admin-complaints table { width: 100%; border-collapse: collapse; }
+        .page-admin-complaints th {
+            text-align: left;
+            padding: 12px 15px;
+            color: #8a9bb5;
+            font-weight: 500;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(125, 255, 106, 0.05);
+        }
+        .page-admin-complaints td {
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(125, 255, 106, 0.05);
+            font-size: 14px;
+        }
+        .page-admin-complaints tr:hover { background: rgba(125, 255, 106, 0.02); }
+        .page-admin-complaints .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .page-admin-complaints .status-badge.submitted { background: rgba(249, 184, 74, 0.2); color: #f9b84a; }
+        .page-admin-complaints .status-badge.verified { background: rgba(52, 152, 219, 0.2); color: #3498db; }
+        .page-admin-complaints .status-badge.in-progress { background: rgba(125, 255, 106, 0.2); color: #7DFF6A; }
+        .page-admin-complaints .status-badge.resolved { background: rgba(46, 204, 113, 0.2); color: #2ecc71; }
+        .page-admin-complaints .status-badge.rejected { background: rgba(255, 82, 82, 0.2); color: #ff6b6b; }
+        .page-admin-complaints .view-btn {
+            padding: 5px 15px;
+            background: rgba(125, 255, 106, 0.1);
+            color: #7DFF6A;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+        .page-admin-complaints .view-btn:hover { background: rgba(125, 255, 106, 0.2); }
+        .page-admin-complaints .empty-state {
+            text-align: center;
+            padding: 50px 0;
+            color: #4a5d7a;
+        }
+        .page-admin-complaints .empty-state i { font-size: 48px; display: block; margin-bottom: 15px; }
+        
+        @media (max-width: 768px) {
+
+            .page-admin-complaints .header { flex-direction: column; align-items: stretch; }
+            .page-admin-complaints .search-box input { min-width: auto; }
+            .page-admin-complaints .filters { justify-content: center; }
+        
+}
+    
