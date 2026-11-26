@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import { apiRequest, resolveUploadUrl } from '../services/api';
 import '../styles/track.css';
+import '../styles/features.css';
 
 function getProgressPercentage(status) {
   switch ((status || '').toLowerCase()) {
@@ -42,7 +44,8 @@ function getStatusBadgeMeta(status) {
 }
 
 export default function TrackPage() {
-  const [complaintId, setComplaintId] = useState('');
+  const [searchParams] = useSearchParams();
+  const [complaintId, setComplaintId] = useState(searchParams.get('id') || '');
   const [mobile, setMobile] = useState('');
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -53,14 +56,24 @@ export default function TrackPage() {
   const [lookupError, setLookupError] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
 
-  const [rating, setRating] = useState(4);
+  const [rating, setRating] = useState(5);
   const [feedbackText, setFeedbackText] = useState('');
+  const [resolutionConfirmed, setResolutionConfirmed] = useState(true);
+  const [feedbackEditing, setFeedbackEditing] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackNotice, setFeedbackNotice] = useState({ type: '', text: '' });
+  const [votingStatus, setVotingStatus] = useState({ enabled: false, message: '' });
 
   const complaintInputRef = useRef(null);
   const mobileInputRef = useRef(null);
 
   useEffect(() => {
     document.title = 'GRAMSETU - Track Complaint';
+    apiRequest('/api/votes/status')
+      .then((res) => {
+        if (res.voting) setVotingStatus(res.voting);
+      })
+      .catch(() => {});
   }, []);
 
   const handleTrack = async () => {
@@ -75,6 +88,7 @@ export default function TrackPage() {
     setLoading(true);
     setTracked(null);
     setNotFound(false);
+    setFeedbackNotice({ type: '', text: '' });
 
     try {
       const data = await apiRequest('/api/complaints/track', {
@@ -84,6 +98,17 @@ export default function TrackPage() {
 
       if (data.status === 'success' && data.complaint) {
         setTracked(data);
+        if (data.feedback) {
+          setRating(data.feedback.rating || 5);
+          setFeedbackText(data.feedback.comment || '');
+          setResolutionConfirmed(Boolean(data.feedback.resolution_confirmed));
+          setFeedbackEditing(false);
+        } else {
+          setRating(5);
+          setFeedbackText('');
+          setResolutionConfirmed(true);
+          setFeedbackEditing(data.complaint.status === 'Resolved');
+        }
       } else {
         setNotFound(true);
       }
@@ -129,13 +154,52 @@ export default function TrackPage() {
     }
   };
 
-  const handleFeedbackSubmit = () => {
-    if (!feedbackText.trim()) {
-      alert('Please enter your feedback');
+  const handleFeedbackSubmit = async () => {
+    if (!complaint?.complaint_id || !mobile.trim()) {
+      setFeedbackNotice({
+        type: 'error',
+        text: 'Please track your complaint with your registered mobile number first.',
+      });
       return;
     }
-    alert('Thank you for your feedback!');
-    setFeedbackText('');
+
+    setFeedbackSubmitting(true);
+    setFeedbackNotice({ type: '', text: '' });
+    try {
+      const res = await apiRequest('/api/complaints/feedback', {
+        method: 'POST',
+        body: {
+          complaint_id: complaint.complaint_id,
+          mobile: mobile.trim(),
+          rating,
+          comment: feedbackText.trim(),
+          resolution_confirmed: resolutionConfirmed,
+        },
+      });
+
+      setTracked((prev) =>
+        prev
+          ? {
+              ...prev,
+              complaint: { ...prev.complaint, status: res.complaint_status },
+              feedback: res.feedback,
+              updates: res.updates || prev.updates,
+            }
+          : prev
+      );
+      setFeedbackEditing(false);
+      setFeedbackNotice({
+        type: 'success',
+        text: res.message || 'Feedback saved successfully!',
+      });
+    } catch (err) {
+      setFeedbackNotice({
+        type: 'error',
+        text: err.message || 'Unable to submit feedback right now.',
+      });
+    } finally {
+      setFeedbackSubmitting(false);
+    }
   };
 
   const complaint = tracked?.complaint || null;
@@ -452,51 +516,154 @@ export default function TrackPage() {
                 </div>
               </div>
 
+              <div className="community-vote-box">
+                <div className="vote-meta-row">
+                  <div>
+                    <h4 style={{ fontWeight: 500, marginBottom: '0.2rem' }}>
+                      <i className="fas fa-thumbs-up" style={{ color: '#7DFF6A', marginRight: '8px' }} />
+                      Community Support Votes
+                    </h4>
+                    <small style={{ color: '#9ab5a6' }}>
+                      {votingStatus.message ||
+                        'Verified mobile OTP voting is disabled until an SMS verification provider is configured.'}
+                    </small>
+                  </div>
+                  <div className="vote-count-pill">
+                    <span>{Number(complaint.vote_count || 0)} Votes</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '0.25rem 0.7rem', fontSize: '0.78rem', opacity: votingStatus.enabled ? 1 : 0.6 }}
+                      disabled={!votingStatus.enabled}
+                    >
+                      {votingStatus.enabled ? 'Vote / Withdraw' : 'Verification Required'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div style={{ marginTop: '2.2rem' }}>
                 <h4 style={{ fontWeight: 500 }}>
                   <i className="fas fa-star" style={{ color: '#7DFF6A', marginRight: '8px' }} />
-                  Rate Resolution
+                  Citizen Feedback &amp; Reopening
                 </h4>
-                <div className="stars" id="starRating">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <i
-                      key={star}
-                      className="fas fa-star"
-                      data-star={star}
-                      style={{
-                        cursor: 'pointer',
-                        color: star <= rating ? '#FFD700' : '#4a5d7a',
-                      }}
-                      onClick={() => setRating(star)}
-                    />
-                  ))}
-                </div>
-                <div className="form-group" style={{ marginTop: '0.2rem' }}>
-                  <textarea
-                    rows={2}
-                    id="feedbackText"
-                    placeholder="Share your feedback..."
-                    value={feedbackText}
-                    onChange={(e) => setFeedbackText(e.target.value)}
-                    style={{
-                      borderRadius: '1.8rem',
-                      padding: '0.9rem 1.4rem',
-                      width: '100%',
-                      background: 'rgba(255,255,255,0.02)',
-                      border: '1px solid rgba(125,255,106,0.08)',
-                      color: '#fff',
-                    }}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  id="submitFeedback"
-                  style={{ width: 'auto' }}
-                  onClick={handleFeedbackSubmit}
-                >
-                  <i className="fas fa-paper-plane" /> Submit Feedback
-                </button>
+
+                {tracked?.feedback && !feedbackEditing ? (
+                  <div className="feedback-summary-box">
+                    <p style={{ color: '#e9fff2', marginBottom: '0.4rem' }}>
+                      <strong>Your Rating:</strong> {tracked.feedback.rating} / 5 Stars ·{' '}
+                      <strong>Outcome:</strong>{' '}
+                      {tracked.feedback.resolution_confirmed
+                        ? 'Resolution Confirmed'
+                        : 'Reopened (Issue Not Resolved)'}
+                    </p>
+                    {tracked.feedback.comment && (
+                      <p style={{ color: '#b0c6e6', marginBottom: '0.6rem' }}>
+                        &ldquo;{tracked.feedback.comment}&rdquo;
+                      </p>
+                    )}
+                    {complaint.status === 'Resolved' && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
+                        onClick={() => setFeedbackEditing(true)}
+                      >
+                        <i className="fas fa-edit" /> Edit Feedback / Confirm Resolution
+                      </button>
+                    )}
+                  </div>
+                ) : complaint.status === 'Resolved' ? (
+                  <>
+                    <div className="stars" id="starRating">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <i
+                          key={star}
+                          className="fas fa-star"
+                          data-star={star}
+                          style={{
+                            cursor: 'pointer',
+                            color: star <= rating ? '#FFD700' : '#4a5d7a',
+                          }}
+                          onClick={() => setRating(star)}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="confirm-choice-group">
+                      <button
+                        type="button"
+                        className={`confirm-choice-btn${resolutionConfirmed ? ' active-resolved' : ''}`}
+                        onClick={() => setResolutionConfirmed(true)}
+                      >
+                        <i className="fas fa-check-circle" /> Yes, Issue Resolved
+                      </button>
+                      <button
+                        type="button"
+                        className={`confirm-choice-btn${!resolutionConfirmed ? ' active-reopen' : ''}`}
+                        onClick={() => setResolutionConfirmed(false)}
+                      >
+                        <i className="fas fa-undo" /> No, Reopen Complaint
+                      </button>
+                    </div>
+
+                    <div className="form-group" style={{ marginTop: '0.2rem' }}>
+                      <textarea
+                        rows={2}
+                        id="feedbackText"
+                        maxLength={1000}
+                        placeholder="Optional comment about the resolution or why it needs reopening..."
+                        value={feedbackText}
+                        onChange={(e) => setFeedbackText(e.target.value)}
+                        style={{
+                          borderRadius: '1.8rem',
+                          padding: '0.9rem 1.4rem',
+                          width: '100%',
+                          background: 'rgba(255,255,255,0.02)',
+                          border: '1px solid rgba(125,255,106,0.08)',
+                          color: '#fff',
+                        }}
+                      />
+                    </div>
+                    <div className="flex-center">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        id="submitFeedback"
+                        style={{ width: 'auto' }}
+                        disabled={feedbackSubmitting}
+                        onClick={handleFeedbackSubmit}
+                      >
+                        <i className={feedbackSubmitting ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane'} />{' '}
+                        {feedbackSubmitting
+                          ? 'Submitting...'
+                          : resolutionConfirmed
+                            ? 'Submit Feedback'
+                            : 'Submit Feedback & Reopen Complaint'}
+                      </button>
+                      {tracked?.feedback && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setFeedbackEditing(false)}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="feedback-notice info">
+                    Feedback and complaint reopening become available once the Panchayat marks this complaint as{' '}
+                    <strong>Resolved</strong>.
+                  </div>
+                )}
+
+                {feedbackNotice.text && (
+                  <div className={`feedback-notice ${feedbackNotice.type}`}>
+                    {feedbackNotice.text}
+                  </div>
+                )}
               </div>
             </section>
           </div>

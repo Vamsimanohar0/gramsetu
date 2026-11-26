@@ -28,5 +28,9 @@ module.exports = {
   uploadsDir: path.resolve(__dirname, '..', 'uploads'),
   maxFileSizeBytes: (Number(process.env.MAX_FILE_SIZE_MB) || 5) * 1024 * 1024,
   maxFiles: Number(process.env.MAX_FILES) || 6,
+  voterHmacSecret:
+    process.env.VOTER_HMAC_SECRET ||
+    (nodeEnv === 'production' ? '' : 'gramsetu-dev-only-voter-hmac-secret'),
+  votingVerificationMode: (process.env.VOTING_VERIFICATION_MODE || 'disabled').trim().toLowerCase(),
 };
 

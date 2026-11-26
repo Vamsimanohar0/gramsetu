@@ -59,12 +59,59 @@ CREATE TABLE IF NOT EXISTS `complaints` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `village_id` int(11) DEFAULT NULL,
   `panchayath_id` int(11) DEFAULT NULL,
+  `latitude` decimal(10,7) DEFAULT NULL,
+  `longitude` decimal(10,7) DEFAULT NULL,
+  `approx_latitude` decimal(10,7) DEFAULT NULL,
+  `approx_longitude` decimal(10,7) DEFAULT NULL,
+  `location_source` enum('gps','manual') DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `complaint_id` (`complaint_id`),
   KEY `village_id` (`village_id`),
   KEY `panchayath_id` (`panchayath_id`),
+  KEY `idx_complaints_approx_coords` (`approx_latitude`, `approx_longitude`),
   CONSTRAINT `complaints_ibfk_1` FOREIGN KEY (`village_id`) REFERENCES `villages` (`id`),
   CONSTRAINT `complaints_ibfk_2` FOREIGN KEY (`panchayath_id`) REFERENCES `panchayaths` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `complaint_status_history` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `complaint_pk` int(11) NOT NULL,
+  `from_status` varchar(32) DEFAULT NULL,
+  `to_status` varchar(32) NOT NULL,
+  `actor_type` enum('system','admin','citizen') NOT NULL DEFAULT 'system',
+  `actor_id` int(11) DEFAULT NULL,
+  `note` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_csh_complaint_created` (`complaint_pk`, `created_at`),
+  CONSTRAINT `fk_csh_complaint` FOREIGN KEY (`complaint_pk`) REFERENCES `complaints` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `complaint_feedback` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `complaint_pk` int(11) NOT NULL,
+  `rating` tinyint(4) NOT NULL,
+  `comment` text DEFAULT NULL,
+  `resolution_confirmed` tinyint(1) NOT NULL DEFAULT 1,
+  `reopen_requested` tinyint(1) NOT NULL DEFAULT 0,
+  `submitted_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_feedback_complaint` (`complaint_pk`),
+  CONSTRAINT `fk_cf_complaint` FOREIGN KEY (`complaint_pk`) REFERENCES `complaints` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `complaint_votes` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `complaint_pk` int(11) NOT NULL,
+  `voter_mobile_hmac` char(64) NOT NULL,
+  `verification_method` varchar(32) NOT NULL,
+  `verified_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_complaint_voter` (`complaint_pk`, `voter_mobile_hmac`),
+  KEY `idx_cv_complaint` (`complaint_pk`),
+  CONSTRAINT `fk_cv_complaint` FOREIGN KEY (`complaint_pk`) REFERENCES `complaints` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `rate_limits` (

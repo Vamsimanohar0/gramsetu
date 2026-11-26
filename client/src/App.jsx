@@ -5,10 +5,12 @@ import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
 import ComplaintPage from './pages/ComplaintPage';
 import TrackPage from './pages/TrackPage';
+import PublicMapPage from './pages/PublicMapPage';
 import AdminLoginPage from './pages/admin/AdminLoginPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminComplaintsPage from './pages/admin/AdminComplaintsPage';
 import AdminViewComplaintPage from './pages/admin/AdminViewComplaintPage';
+import AdminMapPage from './pages/admin/AdminMapPage';
 
 export default function App() {
   return (
@@ -19,6 +21,7 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/complaint" element={<ComplaintPage />} />
             <Route path="/track" element={<TrackPage />} />
+            <Route path="/map" element={<PublicMapPage />} />
 
             <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route
@@ -42,6 +45,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <AdminViewComplaintPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/map"
+              element={
+                <ProtectedRoute>
+                  <AdminMapPage />
                 </ProtectedRoute>
               }
             />

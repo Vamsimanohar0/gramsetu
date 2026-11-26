@@ -84,7 +84,10 @@ export default function AdminComplaintsPage() {
             </h1>
           </div>
           <div className="search-box">
-            <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '10px' }}>
+            <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <Link to="/admin/map" className="back-link" style={{ margin: 0, whiteSpace: 'nowrap' }}>
+                <i className="fas fa-map-marked-alt" /> Map
+              </Link>
               <input
                 type="text"
                 name="search"

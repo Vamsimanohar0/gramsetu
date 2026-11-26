@@ -15,7 +15,12 @@ const {
   validateTrackComplaint,
   validateLookupMobile,
   validateStatusUpdate,
+  validateFeedbackSubmit,
+  validateVoteAction,
 } = require('../validators/complaintValidator');
+const { parseCoordinatePair, toApproximateCoordinates } = require('../utils/locationUtils');
+const { normalizeMobileNumber, hashVoterMobile } = require('../utils/voterHash');
+const { setVerificationProviderForTests } = require('../services/verificationService');
 const {
   parseImagePaths,
   generateComplaintId,
@@ -153,6 +158,8 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
     await publicRoutes.limiters.trackComplaintLimiter.reset();
     await publicRoutes.limiters.lookupIpLimiter.reset();
     await publicRoutes.limiters.lookupMobileLimiter.reset();
+    await publicRoutes.limiters.voteIpLimiter.reset();
+    await publicRoutes.limiters.feedbackLimiter.reset();
     await adminRoutes.limiters.loginLimiter.reset();
   });
 
@@ -584,6 +591,13 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
 
   it('enforces Panchayat isolation across legacy and village-scoped complaints and status updates', async () => {
     const hash = await bcrypt.hash('admin', 4);
+    pool.getConnection = async () => ({
+      beginTransaction: async () => {},
+      execute: async () => [{ affectedRows: 1 }],
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+    });
     pool.execute = async (sql, params) => {
       if (sql.includes('WHERE username = ?')) {
         return [[{ id: 2, name: 'Guntur Panchayath', username: 'guntur', password: hash, status: 'active' }]];
@@ -658,5 +672,389 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
     assert.equal(res.status, 503);
     assert.equal(res.body.status, 'error');
     assert.doesNotMatch(res.body.message, /root|localhost|using password/i);
+  });
+
+  it('validates optional coordinates and computes privacy-safe approximate coordinates without exposing exact public pins', async () => {
+    const omitted = parseCoordinatePair(undefined, '');
+    assert.equal(omitted.provided, false);
+    assert.equal(omitted.valid, true);
+    assert.equal(omitted.latitude, null);
+
+    const partial = parseCoordinatePair('16.5062', '');
+    assert.equal(partial.valid, false);
+
+    const outOfRange = parseCoordinatePair('95.1', '80.6');
+    assert.equal(outOfRange.valid, false);
+
+    const exact = { lat: 16.5062451, lng: 80.6480123 };
+    const approx = toApproximateCoordinates(exact.lat, exact.lng, 'GS-2026-10001');
+    assert.ok(Math.abs(approx.approxLatitude - exact.lat) < 0.01);
+    assert.ok(Math.abs(approx.approxLongitude - exact.lng) < 0.01);
+    assert.notEqual(approx.approxLatitude, exact.lat);
+    assert.notEqual(approx.approxLongitude, exact.lng);
+
+    const validCreateWithLocation = validateCreateComplaint({
+      name: 'Rama Rao',
+      mobile: '+91 9876543210',
+      village_id: '1',
+      category: 'Road Damage',
+      title: 'Broken culvert',
+      description: 'Water logging near bus stop',
+      latitude: '16.5062451',
+      longitude: '80.6480123',
+      location_source: 'gps',
+    });
+    assert.equal(validCreateWithLocation.valid, true);
+    assert.equal(validCreateWithLocation.data.mobile, '9876543210');
+    assert.equal(validCreateWithLocation.data.locationSource, 'gps');
+
+    const hash = await bcrypt.hash('admin', 4);
+    pool.execute = async (sql, params) => {
+      if (sql.includes('c.approx_latitude')) {
+        if (sql.includes('WHERE username = ?')) return [[]];
+        if (sql.includes('FROM villages')) return [[{ id: 1, name: 'Kondapalli' }]];
+        if (sql.includes('c.latitude')) {
+          // Admin map query
+          return [[
+            {
+              id: 21,
+              complaint_id: 'GS-2026-20021',
+              name: 'Rama Rao',
+              village_id: 1,
+              village_name: 'Kondapalli',
+              category: 'Road Damage',
+              title: 'Broken culvert',
+              status: 'Submitted',
+              latitude: '16.5062451',
+              longitude: '80.6480123',
+              approx_latitude: approx.approxLatitude,
+              approx_longitude: approx.approxLongitude,
+              location_source: 'gps',
+              vote_count: 2,
+              created_at: '2026-06-25T10:02:59.000Z',
+            },
+            {
+              id: 22,
+              complaint_id: 'GS-2026-20022',
+              name: 'Sita',
+              village_id: 1,
+              village_name: 'Kondapalli',
+              category: 'Water Supply',
+              title: 'No tap water',
+              status: 'Submitted',
+              latitude: null,
+              longitude: null,
+              approx_latitude: null,
+              approx_longitude: null,
+              location_source: null,
+              vote_count: 0,
+              created_at: '2026-06-25T11:02:59.000Z',
+            },
+          ]];
+        }
+        // Public map query
+        return [[
+          {
+            complaint_id: 'GS-2026-20021',
+            village_id: 1,
+            village_name: 'Kondapalli',
+            category: 'Road Damage',
+            title: 'Broken culvert',
+            status: 'Submitted',
+            approx_latitude: approx.approxLatitude,
+            approx_longitude: approx.approxLongitude,
+            vote_count: 2,
+            created_at: '2026-06-25T10:02:59.000Z',
+          },
+          {
+            complaint_id: 'GS-2026-20022',
+            village_id: 1,
+            village_name: 'Kondapalli',
+            category: 'Water Supply',
+            title: 'No tap water',
+            status: 'Submitted',
+            approx_latitude: null,
+            approx_longitude: null,
+            vote_count: 0,
+            created_at: '2026-06-25T11:02:59.000Z',
+          },
+        ]];
+      }
+      if (sql.includes('WHERE username = ?')) {
+        return [[{ id: 1, name: 'Kondapalli Panchayath', username: params[0], password: hash, status: 'active' }]];
+      }
+      if (sql.includes('FROM panchayaths WHERE id = ?')) {
+        return [[{ id: 1, name: 'Kondapalli Panchayath', username: 'kondapalli', email: '', status: 'active' }]];
+      }
+      if (sql.includes('FROM villages WHERE panchayath_id = ?')) {
+        return [[{ id: 1, name: 'Kondapalli' }]];
+      }
+      return [[]];
+    };
+
+    const publicMap = await invokeApp(app, { method: 'GET', url: '/api/complaints/map?village_id=1' });
+    assert.equal(publicMap.status, 200);
+    assert.equal(publicMap.body.summary.total, 2);
+    assert.equal(publicMap.body.summary.mapped, 1);
+    assert.equal(publicMap.body.summary.unmapped, 1);
+    assert.equal(publicMap.body.markers[0].latitude, undefined);
+    assert.equal(publicMap.body.markers[0].longitude, undefined);
+    assert.equal(publicMap.body.markers[0].name, undefined);
+    assert.equal(publicMap.body.markers[0].approx_latitude, approx.approxLatitude);
+
+    const unauthAdminMap = await invokeApp(app, { method: 'GET', url: '/api/admin/complaints/map' });
+    assert.equal(unauthAdminMap.status, 401);
+
+    const kLogin = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/admin/login',
+      body: { username: 'kondapalli', password: 'admin' },
+    });
+    const kCookie = extractCookiePair(kLogin.headers['set-cookie']);
+
+    const adminMap = await invokeApp(app, {
+      method: 'GET',
+      url: '/api/admin/complaints/map',
+      headers: { Cookie: kCookie },
+    });
+    assert.equal(adminMap.status, 200);
+    assert.equal(adminMap.body.markers[0].latitude, exact.lat);
+    assert.equal(adminMap.body.markers[0].longitude, exact.lng);
+    assert.equal(adminMap.body.summary.unmapped, 1);
+  });
+
+  it('verifies ownership for feedback & reopening, updates status history transactionally, and supports controlled feedback edits', async () => {
+    assert.equal(validateFeedbackSubmit({ complaint_id: 'GS-2026-1', mobile: '9876543210', rating: 6, resolution_confirmed: true }).valid, false);
+    assert.equal(validateFeedbackSubmit({ complaint_id: 'GS-2026-1', mobile: '9876543210', rating: 5 }).valid, false);
+
+    let mockStatus = 'In Progress';
+    let mockFeedback = null;
+    const mockHistory = [
+      { id: 1, from_status: null, to_status: 'Submitted', actor_type: 'system', note: 'Complaint registered', created_at: '2026-06-25T10:00:00Z' },
+    ];
+
+    pool.getConnection = async () => ({
+      beginTransaction: async () => {},
+      execute: async (sql, params) => {
+        if (sql.includes('WHERE complaint_id = ? AND mobile = ?')) {
+          if (params[0] === 'GS-2026-55555' && params[1] === '9876543210') {
+            return [[{ id: 55, complaint_id: 'GS-2026-55555', status: mockStatus }]];
+          }
+          return [[]];
+        }
+        if (sql.includes('FROM complaint_feedback') && sql.includes('WHERE complaint_pk = ?')) {
+          return [mockFeedback ? [mockFeedback] : []];
+        }
+        if (sql.includes('FROM complaint_status_history')) {
+          return [mockHistory];
+        }
+        if (sql.startsWith('INSERT INTO complaint_feedback')) {
+          mockFeedback = {
+            id: 1,
+            rating: params[1],
+            comment: params[2],
+            resolution_confirmed: params[3],
+            reopen_requested: params[4],
+            submitted_at: '2026-06-26T10:00:00Z',
+            updated_at: '2026-06-26T10:00:00Z',
+          };
+          return [{ insertId: 1 }];
+        }
+        if (sql.startsWith('UPDATE complaint_feedback')) {
+          mockFeedback = {
+            ...mockFeedback,
+            rating: params[0],
+            comment: params[1],
+            resolution_confirmed: params[2],
+            reopen_requested: params[3],
+            updated_at: '2026-06-26T10:05:00Z',
+          };
+          return [{ affectedRows: 1 }];
+        }
+        if (sql.startsWith('UPDATE complaints SET status = ?')) {
+          mockStatus = params[0];
+          return [{ affectedRows: 1 }];
+        }
+        if (sql.includes('INSERT INTO complaint_status_history')) {
+          mockHistory.push({
+            id: mockHistory.length + 1,
+            from_status: mockStatus === 'Submitted' ? 'Resolved' : mockStatus,
+            to_status: sql.includes("'Resolved', 'Submitted'") ? 'Submitted' : mockStatus,
+            actor_type: 'citizen',
+            note: params[params.length - 1],
+            created_at: '2026-06-26T10:06:00Z',
+          });
+          return [{ insertId: mockHistory.length }];
+        }
+        return [{ affectedRows: 1 }];
+      },
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+    });
+
+    // Cannot submit feedback before complaint is Resolved
+    const beforeResolved = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/feedback',
+      body: { complaint_id: 'GS-2026-55555', mobile: '9876543210', rating: 5, comment: 'Fast', resolution_confirmed: true },
+    });
+    assert.equal(beforeResolved.status, 400);
+
+    // Wrong mobile fails ownership check
+    mockStatus = 'Resolved';
+    const wrongOwner = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/feedback',
+      body: { complaint_id: 'GS-2026-55555', mobile: '9999999999', rating: 5, resolution_confirmed: true },
+    });
+    assert.equal(wrongOwner.status, 404);
+
+    // Owner submits feedback on Resolved complaint
+    const okFeedback = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/feedback',
+      body: { complaint_id: 'GS-2026-55555', mobile: '9876543210', rating: 4, comment: 'Fixed partially', resolution_confirmed: true },
+    });
+    assert.equal(okFeedback.status, 200);
+    assert.equal(okFeedback.body.reopened, false);
+    assert.equal(okFeedback.body.feedback.rating, 4);
+
+    // Controlled correction -> triggers reopening when resolution_confirmed is false
+    const reopenRes = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/feedback',
+      body: { complaint_id: 'GS-2026-55555', mobile: '9876543210', rating: 2, comment: 'Light went out again', resolution_confirmed: false },
+    });
+    assert.equal(reopenRes.status, 200);
+    assert.equal(reopenRes.body.reopened, true);
+    assert.equal(reopenRes.body.complaint_status, 'Submitted');
+    assert.ok(reopenRes.body.updates.some((u) => u.status === 'Submitted' && /reopened/i.test(u.remarks)));
+
+    // Duplicate reopen is rejected with 409 while still pending review
+    const dupReopen = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/feedback',
+      body: { complaint_id: 'GS-2026-55555', mobile: '9876543210', rating: 1, comment: 'Still waiting', resolution_confirmed: false },
+    });
+    assert.equal(dupReopen.status, 409);
+  });
+
+  it('keeps live voting disabled when no verification provider is configured, and enforces HMAC uniqueness + withdrawal + status immutability with test adapter', async () => {
+    try {
+      setVerificationProviderForTests(null);
+
+      // Default unconfigured state reports disabled cleanly and blocks fake voting
+      const statusRes = await invokeApp(app, { method: 'GET', url: '/api/votes/status' });
+      assert.equal(statusRes.status, 200);
+      assert.equal(statusRes.body.voting.enabled, false);
+
+      const unconfiguredVote = await invokeApp(app, {
+        method: 'POST',
+        url: '/api/complaints/GS-2026-10001/votes',
+        body: { mobile: '9876543210', verification_token: 'fake-token' },
+      });
+      assert.equal(unconfiguredVote.status, 503);
+
+      // Verify normalization + keyed HMAC behavior
+      assert.equal(normalizeMobileNumber('+91 98765-43210'), '9876543210');
+      assert.equal(hashVoterMobile('+919876543210'), hashVoterMobile('09876543210'));
+      assert.notEqual(hashVoterMobile('9876543210'), '9876543210');
+
+      assert.equal(validateVoteAction({ complaint_id: 'GS-2026-10001', mobile: '9876543210' }, { requireToken: true }).valid, false);
+
+      // Inject test-only verification adapter to test duplicate vote prevention & withdrawal
+      setVerificationProviderForTests({
+        methodName: 'test_otp',
+        startVerification: async ({ complaintId }) => ({ challengeId: 'chk-1', complaintId }),
+        verifyAction: async ({ mobile, verificationToken }) => ({
+          verified: verificationToken === 'valid-otp-proof',
+          normalizedMobile: normalizeMobileNumber(mobile),
+          method: 'test_otp',
+        }),
+      });
+
+      const voteSet = new Set();
+      let storedStatus = 'Submitted';
+
+      pool.getConnection = async () => ({
+        beginTransaction: async () => {},
+        execute: async (sql, params) => {
+          if (sql.includes('SELECT id, complaint_id, status FROM complaints')) {
+            return [[{ id: 99, complaint_id: params[0], status: storedStatus }]];
+          }
+          if (sql.startsWith('INSERT INTO complaint_votes')) {
+            const hmac = params[1];
+            if (voteSet.has(hmac)) {
+              const dup = new Error('Duplicate entry');
+              dup.code = 'ER_DUP_ENTRY';
+              throw dup;
+            }
+            voteSet.add(hmac);
+            return [{ insertId: 1 }];
+          }
+          if (sql.startsWith('DELETE FROM complaint_votes')) {
+            const hmac = params[1];
+            const existed = voteSet.delete(hmac);
+            return [{ affectedRows: existed ? 1 : 0 }];
+          }
+          if (sql.includes('SELECT COUNT(*) AS count FROM complaint_votes')) {
+            return [[{ count: voteSet.size }]];
+          }
+          return [{ affectedRows: 1 }];
+        },
+        commit: async () => {},
+        rollback: async () => {},
+        release: () => {},
+      });
+
+      // Invalid verification proof denied (403)
+      const badProof = await invokeApp(app, {
+        method: 'POST',
+        url: '/api/complaints/GS-2026-10001/votes',
+        body: { mobile: '9876543210', verification_token: 'wrong' },
+      });
+      assert.equal(badProof.status, 403);
+
+      // First valid verified vote succeeds; complaint status stays unchanged
+      const voteOk = await invokeApp(app, {
+        method: 'POST',
+        url: '/api/complaints/GS-2026-10001/votes',
+        body: { mobile: '+91 9876543210', verification_token: 'valid-otp-proof' },
+      });
+      assert.equal(voteOk.status, 201);
+      assert.equal(voteOk.body.vote_count, 1);
+      assert.equal(voteOk.body.status, 'Submitted');
+      assert.equal(storedStatus, 'Submitted');
+
+      // Same mobile normalized differently ('09876543210') hits HMAC unique constraint -> 409
+      const dupVote = await invokeApp(app, {
+        method: 'POST',
+        url: '/api/complaints/GS-2026-10001/votes',
+        body: { mobile: '09876543210', verification_token: 'valid-otp-proof' },
+      });
+      assert.equal(dupVote.status, 409);
+
+      // Withdraw vote -> count drops to 0
+      const withdrawOk = await invokeApp(app, {
+        method: 'DELETE',
+        url: '/api/complaints/GS-2026-10001/votes',
+        body: { mobile: '9876543210', verification_token: 'valid-otp-proof' },
+      });
+      assert.equal(withdrawOk.status, 200);
+      assert.equal(withdrawOk.body.vote_count, 0);
+      assert.equal(withdrawOk.body.voted, false);
+
+      // Resolved complaints cannot receive new votes
+      storedStatus = 'Resolved';
+      const voteResolved = await invokeApp(app, {
+        method: 'POST',
+        url: '/api/complaints/GS-2026-10001/votes',
+        body: { mobile: '9876543210', verification_token: 'valid-otp-proof' },
+      });
+      assert.equal(voteResolved.status, 400);
+    } finally {
+      setVerificationProviderForTests(null);
+    }
   });
 });

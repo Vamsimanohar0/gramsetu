@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import Navbar from '../components/Navbar';
+import ComplaintMapPicker from '../components/ComplaintMapPicker';
 import { apiRequest } from '../services/api';
 import '../styles/complaint.css';
+import '../styles/features.css';
 
 const CATEGORIES = [
   'Road Damage',
@@ -32,12 +34,18 @@ export default function ComplaintPage() {
   const [dragOver, setDragOver] = useState(false);
 
   const [isListening, setIsListening] = useState(false);
+  const [voiceLang, setVoiceLang] = useState('en-IN');
+  const [voiceNotice, setVoiceNotice] = useState('');
+  const [latitude, setLatitude] = useState(null);
+  const [longitude, setLongitude] = useState(null);
+  const [locationSource, setLocationSource] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState('');
   const [submittedId, setSubmittedId] = useState('');
 
   const fileInputRef = useRef(null);
   const toastTimerRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   const speechSupported =
     typeof window !== 'undefined' &&
@@ -45,6 +53,15 @@ export default function ComplaintPage() {
 
   useEffect(() => {
     document.title = 'GRAMSETU';
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // Ignore stop cleanup errors
+        }
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -113,36 +130,78 @@ export default function ComplaintPage() {
   };
 
   const handleSpeechClick = () => {
-    if (!speechSupported) return;
+    if (!speechSupported) {
+      setVoiceNotice('Voice input is not supported in this browser. Please type your description below.');
+      return;
+    }
+
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        setIsListening(false);
+      }
+      return;
+    }
+
+    setVoiceNotice('');
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = false;
-    recognition.lang = 'en-IN';
+    recognition.lang = voiceLang;
 
     recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
+      let transcriptChunk = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        if (event.results[i].isFinal && event.results[i][0]) {
+          transcriptChunk += `${event.results[i][0].transcript} `;
+        }
+      }
+      const cleaned = transcriptChunk.trim();
+      if (!cleaned) return;
       setDescription((prev) => {
-        const next = prev ? `${prev} ${transcript}` : transcript;
+        const next = prev ? `${prev.trim()} ${cleaned}` : cleaned;
         return next.slice(0, 1000);
       });
-      setIsListening(false);
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
       setIsListening(false);
-      showToast('Mic access denied. Please type your complaint.');
+      const errCode = event?.error || '';
+      if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+        const msg = 'Microphone permission was denied. Allow mic access or type manually.';
+        setVoiceNotice(msg);
+        showToast(msg);
+      } else if (errCode === 'language-not-supported') {
+        const msg = `Selected voice language (${voiceLang === 'te-IN' ? 'Telugu' : 'English'}) is not supported by this browser. Try English or type manually.`;
+        setVoiceNotice(msg);
+        showToast(msg);
+      } else if (errCode === 'no-speech') {
+        setVoiceNotice('No speech detected. Speak clearly and try again, or type manually.');
+      } else if (errCode === 'audio-capture') {
+        setVoiceNotice('No microphone detected on this device. Please type your complaint.');
+      } else {
+        setVoiceNotice('Voice recognition stopped due to an error. You can continue typing manually.');
+      }
     };
 
     recognition.onend = () => {
       setIsListening(false);
+      recognitionRef.current = null;
     };
 
     try {
+      recognitionRef.current = recognition;
       recognition.start();
       setIsListening(true);
+      setVoiceNotice(
+        `Listening in ${voiceLang === 'te-IN' ? 'తెలుగు (te-IN)' : 'English (en-IN)'}... Click Stop when finished. Review before submitting.`
+      );
     } catch {
-      showToast('Microphone error, please try again.');
+      recognitionRef.current = null;
+      setIsListening(false);
+      showToast('Microphone error, please try again or type manually.');
     }
   };
 
@@ -156,6 +215,10 @@ export default function ComplaintPage() {
     setDescription('');
     setConfirmCheck(false);
     setSelectedFiles([]);
+    setLatitude(null);
+    setLongitude(null);
+    setLocationSource(null);
+    setVoiceNotice('');
   };
 
   const handleSubmit = async (e) => {
@@ -189,6 +252,13 @@ export default function ComplaintPage() {
     formData.append('category', category);
     formData.append('title', trimmedTitle);
     formData.append('description', trimmedDesc);
+    if (latitude !== null && longitude !== null) {
+      formData.append('latitude', String(latitude));
+      formData.append('longitude', String(longitude));
+      if (locationSource) {
+        formData.append('location_source', locationSource);
+      }
+    }
     selectedFiles.forEach((file) => {
       formData.append('images[]', file);
     });
@@ -381,22 +451,41 @@ export default function ComplaintPage() {
                   <label htmlFor="description">
                     <i className="fas fa-edit" /> Detailed Description
                   </label>
-                  <button
-                    type="button"
-                    id="micSpeechBtn"
-                    className="mic-button"
-                    disabled={!speechSupported}
-                    style={{
-                      opacity: speechSupported ? 1 : 0.5,
-                      background: isListening ? '#347a5b' : '#1f6046',
-                    }}
-                    title={!speechSupported ? 'Speech not supported in this browser' : undefined}
-                    onClick={handleSpeechClick}
-                  >
-                    <i className={isListening ? 'fas fa-microphone-alt' : 'fas fa-microphone'} />{' '}
-                    <span>{isListening ? 'Listening...' : "Can't type? Click & speak"}</span>
-                  </button>
+                  <div className="voice-controls">
+                    <select
+                      id="voiceLanguageSelect"
+                      className="voice-lang-select"
+                      value={voiceLang}
+                      disabled={!speechSupported || isListening}
+                      onChange={(e) => setVoiceLang(e.target.value)}
+                      aria-label="Voice input language"
+                    >
+                      <option value="en-IN">English (India)</option>
+                      <option value="te-IN">తెలుగు (Telugu)</option>
+                    </select>
+                    <button
+                      type="button"
+                      id="micSpeechBtn"
+                      className="mic-button"
+                      disabled={!speechSupported}
+                      style={{
+                        opacity: speechSupported ? 1 : 0.5,
+                        background: isListening ? '#c0392b' : '#1f6046',
+                      }}
+                      title={!speechSupported ? 'Speech not supported in this browser' : undefined}
+                      onClick={handleSpeechClick}
+                    >
+                      <i className={isListening ? 'fas fa-stop-circle' : 'fas fa-microphone'} />{' '}
+                      <span>{isListening ? 'Stop Listening' : 'Speak'}</span>
+                    </button>
+                  </div>
                 </div>
+                {!speechSupported && (
+                  <p className="voice-hint warning">
+                    Voice dictation is unavailable in this browser. You can type your complaint directly below.
+                  </p>
+                )}
+                {voiceNotice && <p className="voice-hint">{voiceNotice}</p>}
                 <textarea
                   id="description"
                   rows={4}
@@ -411,6 +500,27 @@ export default function ComplaintPage() {
                   <span id="charCount">{description.length}</span> / 1000 Characters
                 </div>
               </div>
+            </div>
+
+            {/* OPTIONAL MAP LOCATION SECTION */}
+            <div className="form-card">
+              <div className="card-header">
+                <i className="fas fa-map-marked-alt" />
+                <h3>
+                  Pin Issue Location{' '}
+                  <span className="step-badge optional-badge">Optional</span>
+                </h3>
+              </div>
+              <ComplaintMapPicker
+                latitude={latitude}
+                longitude={longitude}
+                locationSource={locationSource}
+                onChange={({ latitude: lat, longitude: lng, locationSource: src }) => {
+                  setLatitude(lat);
+                  setLongitude(lng);
+                  setLocationSource(src);
+                }}
+              />
             </div>
 
             {/* EVIDENCE UPLOAD SECTION */}

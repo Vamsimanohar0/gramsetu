@@ -1,11 +1,13 @@
 const { ALLOWED_STATUSES } = require('../utils/complaintUtils');
+const { parseCoordinatePair } = require('../utils/locationUtils');
+const { normalizeMobileNumber } = require('../utils/voterHash');
 
 const MOBILE_REGEX = /^[0-9]{10}$/;
 const COMPLAINT_ID_REGEX = /^[A-Za-z0-9-]{4,20}$/;
 
 function validateCreateComplaint(body = {}) {
   const name = String(body.name ?? '').trim();
-  const mobile = String(body.mobile ?? '').trim();
+  const mobile = normalizeMobileNumber(body.mobile);
   const villageId = Number.parseInt(body.village_id, 10);
   const wardNo = String(body.ward_no ?? '').trim();
   const category = String(body.category ?? '').trim();
@@ -42,6 +44,20 @@ function validateCreateComplaint(body = {}) {
     return { valid: false, message: 'Description must be 1000 characters or fewer' };
   }
 
+  const coords = parseCoordinatePair(body.latitude, body.longitude);
+  if (!coords.valid) {
+    return { valid: false, message: coords.message };
+  }
+
+  let locationSource = null;
+  if (coords.provided) {
+    const rawSource = String(body.location_source ?? 'manual').trim().toLowerCase();
+    if (rawSource !== 'gps' && rawSource !== 'manual') {
+      return { valid: false, message: 'Invalid location source' };
+    }
+    locationSource = rawSource;
+  }
+
   return {
     valid: true,
     data: {
@@ -52,6 +68,9 @@ function validateCreateComplaint(body = {}) {
       category,
       title,
       description,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      locationSource,
     },
   };
 }
@@ -133,7 +152,91 @@ function validateStatusUpdate(body = {}) {
       message: `Invalid status. Allowed values: ${ALLOWED_STATUSES.join(', ')}`,
     };
   }
-  return { valid: true, data: { status } };
+  const note = String(body.note ?? body.remarks ?? '').trim();
+  if (note.length > 500) {
+    return {
+      valid: false,
+      message: 'Status note must be 500 characters or fewer.',
+    };
+  }
+  return { valid: true, data: { status, note } };
+}
+
+function validateFeedbackSubmit(body = {}) {
+  const complaintId = String(body.complaint_id ?? '').trim();
+  const mobile = normalizeMobileNumber(body.mobile);
+  const rating = Number(body.rating);
+  const comment = String(body.comment ?? '').trim();
+  const rawConfirmed = body.resolution_confirmed;
+
+  if (!complaintId || !COMPLAINT_ID_REGEX.test(complaintId)) {
+    return { valid: false, message: 'Please enter a valid Complaint ID.' };
+  }
+
+  if (!MOBILE_REGEX.test(mobile)) {
+    return { valid: false, message: 'Please enter a valid 10-digit mobile number.' };
+  }
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return { valid: false, message: 'Please select a star rating between 1 and 5.' };
+  }
+
+  if (comment.length > 1000) {
+    return { valid: false, message: 'Feedback comment must be 1000 characters or fewer.' };
+  }
+
+  let resolutionConfirmed;
+  if (typeof rawConfirmed === 'boolean') {
+    resolutionConfirmed = rawConfirmed;
+  } else if (rawConfirmed === 'true' || rawConfirmed === 1 || rawConfirmed === '1') {
+    resolutionConfirmed = true;
+  } else if (rawConfirmed === 'false' || rawConfirmed === 0 || rawConfirmed === '0') {
+    resolutionConfirmed = false;
+  } else {
+    return { valid: false, message: 'Please confirm whether the issue is resolved or needs reopening.' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      complaintId,
+      mobile,
+      rating,
+      comment,
+      resolutionConfirmed,
+    },
+  };
+}
+
+function validateVoteAction(body = {}, { requireToken = true } = {}) {
+  const complaintId = String(body.complaint_id ?? '').trim();
+  const mobile = normalizeMobileNumber(body.mobile);
+  const verificationToken = String(body.verification_token ?? '').trim();
+
+  if (!complaintId || !COMPLAINT_ID_REGEX.test(complaintId)) {
+    return { valid: false, message: 'Please enter a valid Complaint ID.' };
+  }
+
+  if (!MOBILE_REGEX.test(mobile)) {
+    return { valid: false, message: 'Please enter a valid 10-digit mobile number.' };
+  }
+
+  if (requireToken && !verificationToken) {
+    return { valid: false, message: 'Mobile verification token is required before voting.' };
+  }
+
+  if (verificationToken.length > 255) {
+    return { valid: false, message: 'Invalid verification token format.' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      complaintId,
+      mobile,
+      verificationToken,
+    },
+  };
 }
 
 module.exports = {
@@ -142,4 +245,6 @@ module.exports = {
   validateLookupMobile,
   validateLogin,
   validateStatusUpdate,
+  validateFeedbackSubmit,
+  validateVoteAction,
 };

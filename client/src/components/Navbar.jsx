@@ -42,6 +42,11 @@ export default function Navbar() {
               </NavLink>
             </li>
             <li>
+              <NavLink to="/map" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Complaint Map
+              </NavLink>
+            </li>
+            <li>
               <NavLink to="/admin/login" className={({ isActive }) => (isActive ? 'active' : '')}>
                 Panchayat Login
               </NavLink>
@@ -89,6 +94,9 @@ export default function Navbar() {
         </NavLink>
         <NavLink to="/track" onClick={closeMenu}>
           🔍 Track Complaint
+        </NavLink>
+        <NavLink to="/map" onClick={closeMenu}>
+          🗺️ Complaint Map
         </NavLink>
         <NavLink to="/admin/login" onClick={closeMenu}>
           🏛️ Panchayat Login

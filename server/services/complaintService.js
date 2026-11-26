@@ -9,6 +9,7 @@ const {
   maskTitle,
 } = require('../utils/complaintUtils');
 const { signCitizenEvidenceToken } = require('../utils/evidenceToken');
+const { toApproximateCoordinates } = require('../utils/locationUtils');
 
 function buildAdminImageUrls(complaintPk, rawImagePath) {
   return parseImagePaths(rawImagePath).map((imgPath) => {
@@ -25,21 +26,43 @@ function buildCitizenImageUrls(complaintId, rawImagePath) {
   });
 }
 
+function toNullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
 function formatAdminComplaintRow(row) {
   if (!row) return null;
+  const latitude = toNullableNumber(row.latitude);
+  const longitude = toNullableNumber(row.longitude);
+  const approxLatitude = toNullableNumber(row.approx_latitude);
+  const approxLongitude = toNullableNumber(row.approx_longitude);
+
   return {
     ...row,
     village: row.village_name || row.village || 'N/A',
     images: buildAdminImageUrls(row.id, row.image_path),
+    latitude,
+    longitude,
+    approx_latitude: approxLatitude,
+    approx_longitude: approxLongitude,
+    location_source: row.location_source || null,
+    has_location: latitude !== null && longitude !== null,
+    vote_count: Number(row.vote_count || 0),
   };
 }
 
 function formatPublicComplaintRow(row) {
   if (!row) return null;
+  const approxLatitude = toNullableNumber(row.approx_latitude);
+  const approxLongitude = toNullableNumber(row.approx_longitude);
+
   return {
     complaint_id: row.complaint_id,
     name: maskPersonName(row.name),
     mobile: maskMobile(row.mobile),
+    village_id: row.village_id || null,
     village: row.village_name || row.village || 'N/A',
     ward_no: row.ward_no || '',
     category: row.category || 'N/A',
@@ -48,6 +71,10 @@ function formatPublicComplaintRow(row) {
     images: buildCitizenImageUrls(row.complaint_id, row.image_path),
     audio_path: null,
     status: row.status,
+    vote_count: Number(row.vote_count || 0),
+    has_location: approxLatitude !== null && approxLongitude !== null,
+    approx_latitude: approxLatitude,
+    approx_longitude: approxLongitude,
     created_at: row.created_at,
   };
 }
@@ -101,7 +128,13 @@ async function createComplaint(data, uploadedFiles = []) {
       throw new Error('Could not generate a unique Complaint ID. Please try again.');
     }
 
-    await connection.execute(
+    const hasCoords = data.latitude !== null && data.longitude !== null &&
+      data.latitude !== undefined && data.longitude !== undefined;
+    const { approxLatitude, approxLongitude } = hasCoords
+      ? toApproximateCoordinates(data.latitude, data.longitude, complaintId)
+      : { approxLatitude: null, approxLongitude: null };
+
+    const [insertResult] = await connection.execute(
       `INSERT INTO complaints (
         complaint_id,
         name,
@@ -113,9 +146,14 @@ async function createComplaint(data, uploadedFiles = []) {
         title,
         description,
         image_path,
+        latitude,
+        longitude,
+        approx_latitude,
+        approx_longitude,
+        location_source,
         status,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
       [
         complaintId,
         data.name,
@@ -127,14 +165,36 @@ async function createComplaint(data, uploadedFiles = []) {
         data.title,
         data.description,
         imagePathsJson,
+        hasCoords ? data.latitude : null,
+        hasCoords ? data.longitude : null,
+        approxLatitude,
+        approxLongitude,
+        hasCoords ? data.locationSource : null,
       ]
     );
+
+    if (insertResult && insertResult.insertId) {
+      await connection.execute(
+        `INSERT INTO complaint_status_history (
+          complaint_pk,
+          from_status,
+          to_status,
+          actor_type,
+          actor_id,
+          note
+        ) VALUES (?, NULL, 'Submitted', 'system', NULL, ?)`,
+        [insertResult.insertId, 'Complaint registered by citizen']
+      );
+    }
 
     await connection.commit();
 
     return {
       complaint_id: complaintId,
       images: imagePaths.map((p) => path.basename(p)),
+      has_location: hasCoords,
+      approx_latitude: approxLatitude,
+      approx_longitude: approxLongitude,
     };
   } catch (err) {
     await connection.rollback();
@@ -144,11 +204,67 @@ async function createComplaint(data, uploadedFiles = []) {
   }
 }
 
+async function getComplaintHistoryAndFeedback(connectionOrPool, complaintPk, currentStatus, createdAt) {
+  const [historyRows] = await connectionOrPool.execute(
+    `SELECT id, from_status, to_status, actor_type, note, created_at
+     FROM complaint_status_history
+     WHERE complaint_pk = ?
+     ORDER BY created_at ASC, id ASC`,
+    [complaintPk]
+  );
+
+  const updates =
+    Array.isArray(historyRows) && historyRows.length > 0
+      ? historyRows.map((row) => ({
+          id: row.id,
+          from_status: row.from_status,
+          status: row.to_status,
+          actor_type: row.actor_type,
+          remarks: row.note || `Status changed to ${row.to_status}`,
+          updated_at: row.created_at,
+        }))
+      : [
+          {
+            status: currentStatus,
+            remarks: `Current status: ${currentStatus}`,
+            updated_at: createdAt,
+          },
+        ];
+
+  const [feedbackRows] = await connectionOrPool.execute(
+    `SELECT id, rating, comment, resolution_confirmed, reopen_requested, submitted_at, updated_at
+     FROM complaint_feedback
+     WHERE complaint_pk = ?
+     LIMIT 1`,
+    [complaintPk]
+  );
+
+  const feedback =
+    Array.isArray(feedbackRows) && feedbackRows.length > 0
+      ? {
+          rating: Number(feedbackRows[0].rating),
+          comment: feedbackRows[0].comment || '',
+          resolution_confirmed: Boolean(Number(feedbackRows[0].resolution_confirmed)),
+          reopen_requested: Boolean(Number(feedbackRows[0].reopen_requested)),
+          submitted_at: feedbackRows[0].submitted_at,
+          updated_at: feedbackRows[0].updated_at,
+        }
+      : null;
+
+  return { updates, feedback };
+}
+
 async function trackComplaint(complaintId, mobile) {
   const [rows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
+            COALESCE(cv.vote_count, 0) AS vote_count
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
+     LEFT JOIN (
+       SELECT complaint_pk, COUNT(*) AS vote_count
+       FROM complaint_votes
+       GROUP BY complaint_pk
+     ) cv ON cv.complaint_pk = c.id
      WHERE c.complaint_id = ? AND c.mobile = ?
      LIMIT 1`,
     [complaintId, mobile]
@@ -158,19 +274,142 @@ async function trackComplaint(complaintId, mobile) {
     return null;
   }
 
-  const complaint = formatPublicComplaintRow(rows[0]);
-  const updates = [
-    {
-      status: complaint.status,
-      remarks: `Current status: ${complaint.status}`,
-      updated_at: complaint.created_at,
-    },
-  ];
+  const row = rows[0];
+  const complaint = formatPublicComplaintRow(row);
+  const { updates, feedback } = await getComplaintHistoryAndFeedback(
+    pool,
+    row.id,
+    complaint.status,
+    complaint.created_at
+  );
 
   return {
     complaint,
     updates,
+    feedback,
   };
+}
+
+async function submitComplaintFeedback({
+  complaintId,
+  mobile,
+  rating,
+  comment,
+  resolutionConfirmed,
+}) {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.execute(
+      `SELECT id, complaint_id, status
+       FROM complaints
+       WHERE complaint_id = ? AND mobile = ?
+       LIMIT 1`,
+      [complaintId, mobile]
+    );
+
+    if (rows.length === 0) {
+      const err = new Error('Complaint not found or mobile number does not match our records.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const complaint = rows[0];
+    const [existingFeedbackRows] = await connection.execute(
+      `SELECT id, rating, comment, resolution_confirmed, reopen_requested
+       FROM complaint_feedback
+       WHERE complaint_pk = ?
+       LIMIT 1`,
+      [complaint.id]
+    );
+
+    const existingFeedback = existingFeedbackRows.length > 0 ? existingFeedbackRows[0] : null;
+    const isResolved = complaint.status === 'Resolved';
+    const isControlledCorrection = existingFeedback !== null && (isResolved || resolutionConfirmed === false);
+
+    if (!isResolved && !isControlledCorrection) {
+      const err = new Error('Feedback and reopening can only be submitted after a complaint is marked Resolved.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (!resolutionConfirmed && !isResolved && existingFeedback && Number(existingFeedback.reopen_requested) === 1) {
+      const err = new Error('This complaint has already been reopened and is awaiting Panchayat review.');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const reopenTriggered = isResolved && resolutionConfirmed === false;
+    const reopenRequestedFlag = reopenTriggered || (existingFeedback && Number(existingFeedback.reopen_requested) === 1 && !resolutionConfirmed) ? 1 : 0;
+
+    if (existingFeedback) {
+      await connection.execute(
+        `UPDATE complaint_feedback
+         SET rating = ?, comment = ?, resolution_confirmed = ?, reopen_requested = ?, updated_at = NOW()
+         WHERE complaint_pk = ?`,
+        [rating, comment || null, resolutionConfirmed ? 1 : 0, reopenRequestedFlag, complaint.id]
+      );
+    } else {
+      await connection.execute(
+        `INSERT INTO complaint_feedback (
+          complaint_pk, rating, comment, resolution_confirmed, reopen_requested
+        ) VALUES (?, ?, ?, ?, ?)`,
+        [complaint.id, rating, comment || null, resolutionConfirmed ? 1 : 0, reopenRequestedFlag]
+      );
+    }
+
+    let nextStatus = complaint.status;
+    if (reopenTriggered) {
+      nextStatus = 'Submitted';
+      await connection.execute('UPDATE complaints SET status = ? WHERE id = ?', [
+        nextStatus,
+        complaint.id,
+      ]);
+      const reopenNote = comment
+        ? `Citizen feedback (${rating}/5): Issue not resolved — reopened complaint. Note: ${comment}`
+        : `Citizen feedback (${rating}/5): Issue not resolved — complaint reopened by citizen.`;
+      await connection.execute(
+        `INSERT INTO complaint_status_history (
+          complaint_pk, from_status, to_status, actor_type, actor_id, note
+        ) VALUES (?, 'Resolved', 'Submitted', 'citizen', NULL, ?)`,
+        [complaint.id, reopenNote]
+      );
+    } else if (!existingFeedback) {
+      const confirmNote = comment
+        ? `Citizen feedback submitted (${rating}/5): Resolution confirmed. "${comment}"`
+        : `Citizen feedback submitted (${rating}/5): Resolution confirmed by citizen.`;
+      await connection.execute(
+        `INSERT INTO complaint_status_history (
+          complaint_pk, from_status, to_status, actor_type, actor_id, note
+        ) VALUES (?, ?, ?, 'citizen', NULL, ?)`,
+        [complaint.id, complaint.status, complaint.status, confirmNote]
+      );
+    }
+
+    const { updates, feedback } = await getComplaintHistoryAndFeedback(
+      connection,
+      complaint.id,
+      nextStatus,
+      null
+    );
+
+    await connection.commit();
+
+    return {
+      complaint_id: complaint.complaint_id,
+      status: nextStatus,
+      reopened: reopenTriggered,
+      corrected: Boolean(existingFeedback),
+      feedback,
+      updates,
+    };
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
 }
 
 async function complaintHasImage(complaintId, filename) {
@@ -261,9 +500,15 @@ async function getDashboardData(panchayathId) {
   }
 
   const [recentRows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
+            COALESCE(cv.vote_count, 0) AS vote_count
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
+     LEFT JOIN (
+       SELECT complaint_pk, COUNT(*) AS vote_count
+       FROM complaint_votes
+       GROUP BY complaint_pk
+     ) cv ON cv.complaint_pk = c.id
      WHERE ${joinedScope.clause}
      ORDER BY c.created_at DESC
      LIMIT 10`,
@@ -278,7 +523,7 @@ async function getDashboardData(panchayathId) {
   };
 }
 
-async function getAdminComplaints(panchayathId, { status = '', search = '' } = {}) {
+async function getAdminComplaints(panchayathId, { status = '', search = '', villageId = '' } = {}) {
   const villages = await getPanchayathVillages(panchayathId);
   const villageIds = villages.map((v) => v.id);
 
@@ -291,6 +536,12 @@ async function getAdminComplaints(panchayathId, { status = '', search = '' } = {
     params.push(status);
   }
 
+  const parsedVillageId = Number.parseInt(villageId, 10);
+  if (parsedVillageId && !Number.isNaN(parsedVillageId) && parsedVillageId > 0) {
+    conditions.push('c.village_id = ?');
+    params.push(parsedVillageId);
+  }
+
   const trimmedSearch = String(search || '').trim();
   if (trimmedSearch) {
     conditions.push('(c.name LIKE ? OR c.complaint_id LIKE ? OR c.mobile LIKE ?)');
@@ -299,9 +550,15 @@ async function getAdminComplaints(panchayathId, { status = '', search = '' } = {
   }
 
   const [rows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
+            COALESCE(cv.vote_count, 0) AS vote_count
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
+     LEFT JOIN (
+       SELECT complaint_pk, COUNT(*) AS vote_count
+       FROM complaint_votes
+       GROUP BY complaint_pk
+     ) cv ON cv.complaint_pk = c.id
      WHERE ${conditions.join(' AND ')}
      ORDER BY c.created_at DESC`,
     params
@@ -310,7 +567,7 @@ async function getAdminComplaints(panchayathId, { status = '', search = '' } = {
   return rows.map(formatAdminComplaintRow);
 }
 
-async function getAdminComplaintById(panchayathId, id) {
+async function getAdminComplaintById(panchayathId, id, { includeDetails = false } = {}) {
   const numericId = Number.parseInt(id, 10);
   if (!numericId || Number.isNaN(numericId) || numericId <= 0) {
     return null;
@@ -321,15 +578,41 @@ async function getAdminComplaintById(panchayathId, id) {
   const joinedScope = buildPanchayathScopeClause(panchayathId, villageIds, 'c');
 
   const [rows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
+            COALESCE(cv.vote_count, 0) AS vote_count
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
+     LEFT JOIN (
+       SELECT complaint_pk, COUNT(*) AS vote_count
+       FROM complaint_votes
+       GROUP BY complaint_pk
+     ) cv ON cv.complaint_pk = c.id
      WHERE c.id = ? AND ${joinedScope.clause}
      LIMIT 1`,
     [numericId, ...joinedScope.params]
   );
 
-  return rows.length > 0 ? formatAdminComplaintRow(rows[0]) : null;
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const formatted = formatAdminComplaintRow(rows[0]);
+  if (!includeDetails) {
+    return formatted;
+  }
+
+  const { updates, feedback } = await getComplaintHistoryAndFeedback(
+    pool,
+    formatted.id,
+    formatted.status,
+    formatted.created_at
+  );
+
+  return {
+    ...formatted,
+    updates,
+    feedback,
+  };
 }
 
 async function adminComplaintHasImage(panchayathId, id, filename) {
@@ -339,20 +622,179 @@ async function adminComplaintHasImage(panchayathId, id, filename) {
   return parseImagePaths(complaint.image_path).some((p) => path.basename(p) === target);
 }
 
-async function updateAdminComplaintStatus(panchayathId, id, status) {
+async function updateAdminComplaintStatus(panchayathId, id, status, note = '') {
   const existing = await getAdminComplaintById(panchayathId, id);
   if (!existing) {
     return null;
   }
 
-  await pool.execute('UPDATE complaints SET status = ? WHERE id = ?', [status, existing.id]);
-  return getAdminComplaintById(panchayathId, existing.id);
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.execute('UPDATE complaints SET status = ? WHERE id = ?', [status, existing.id]);
+    await connection.execute(
+      `INSERT INTO complaint_status_history (
+        complaint_pk, from_status, to_status, actor_type, actor_id, note
+      ) VALUES (?, ?, ?, 'admin', ?, ?)`,
+      [
+        existing.id,
+        existing.status || null,
+        status,
+        panchayathId,
+        note || `Status updated by Panchayat Admin from ${existing.status} to ${status}`,
+      ]
+    );
+    await connection.commit();
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
+
+  return getAdminComplaintById(panchayathId, existing.id, { includeDetails: true });
+}
+
+async function getPublicMapComplaints({ villageId = '', category = '', status = '' } = {}) {
+  const conditions = ['1 = 1'];
+  const params = [];
+
+  const parsedVillageId = Number.parseInt(villageId, 10);
+  if (parsedVillageId && !Number.isNaN(parsedVillageId) && parsedVillageId > 0) {
+    conditions.push('c.village_id = ?');
+    params.push(parsedVillageId);
+  }
+
+  const trimmedCategory = String(category || '').trim();
+  if (trimmedCategory) {
+    conditions.push('c.category = ?');
+    params.push(trimmedCategory);
+  }
+
+  const trimmedStatus = String(status || '').trim();
+  if (trimmedStatus && ALLOWED_STATUSES.includes(trimmedStatus)) {
+    conditions.push('c.status = ?');
+    params.push(trimmedStatus);
+  }
+
+  const [rows] = await pool.execute(
+    `SELECT c.complaint_id, c.village_id, COALESCE(v.name, c.village) AS village_name,
+            c.category, c.title, c.status, c.approx_latitude, c.approx_longitude,
+            c.created_at, COALESCE(cv.vote_count, 0) AS vote_count
+     FROM complaints c
+     LEFT JOIN villages v ON c.village_id = v.id
+     LEFT JOIN (
+       SELECT complaint_pk, COUNT(*) AS vote_count
+       FROM complaint_votes
+       GROUP BY complaint_pk
+     ) cv ON cv.complaint_pk = c.id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY c.created_at DESC`,
+    params
+  );
+
+  const complaints = [];
+  const markers = [];
+
+  for (const row of rows) {
+    const approxLat = toNullableNumber(row.approx_latitude);
+    const approxLng = toNullableNumber(row.approx_longitude);
+    const hasLocation = approxLat !== null && approxLng !== null;
+
+    const publicItem = {
+      complaint_id: row.complaint_id,
+      village_id: row.village_id || null,
+      village: row.village_name || 'N/A',
+      category: row.category || 'N/A',
+      title: row.title || '',
+      status: row.status,
+      vote_count: Number(row.vote_count || 0),
+      has_location: hasLocation,
+      approx_latitude: approxLat,
+      approx_longitude: approxLng,
+      created_at: row.created_at,
+    };
+
+    complaints.push(publicItem);
+    if (hasLocation) {
+      markers.push(publicItem);
+    }
+  }
+
+  return {
+    complaints,
+    markers,
+    summary: {
+      total: complaints.length,
+      mapped: markers.length,
+      unmapped: complaints.length - markers.length,
+    },
+  };
+}
+
+async function getAdminMapComplaints(panchayathId, { villageId = '', category = '', status = '' } = {}) {
+  const villages = await getPanchayathVillages(panchayathId);
+  const villageIds = villages.map((v) => v.id);
+  const joinedScope = buildPanchayathScopeClause(panchayathId, villageIds, 'c');
+
+  const conditions = [joinedScope.clause];
+  const params = [...joinedScope.params];
+
+  const parsedVillageId = Number.parseInt(villageId, 10);
+  if (parsedVillageId && !Number.isNaN(parsedVillageId) && parsedVillageId > 0) {
+    conditions.push('c.village_id = ?');
+    params.push(parsedVillageId);
+  }
+
+  const trimmedCategory = String(category || '').trim();
+  if (trimmedCategory) {
+    conditions.push('c.category = ?');
+    params.push(trimmedCategory);
+  }
+
+  const trimmedStatus = String(status || '').trim();
+  if (trimmedStatus && ALLOWED_STATUSES.includes(trimmedStatus)) {
+    conditions.push('c.status = ?');
+    params.push(trimmedStatus);
+  }
+
+  const [rows] = await pool.execute(
+    `SELECT c.id, c.complaint_id, c.name, c.village_id, COALESCE(v.name, c.village) AS village_name,
+            c.ward_no, c.category, c.title, c.status, c.latitude, c.longitude,
+            c.approx_latitude, c.approx_longitude, c.location_source, c.created_at,
+            COALESCE(cv.vote_count, 0) AS vote_count
+     FROM complaints c
+     LEFT JOIN villages v ON c.village_id = v.id
+     LEFT JOIN (
+       SELECT complaint_pk, COUNT(*) AS vote_count
+       FROM complaint_votes
+       GROUP BY complaint_pk
+     ) cv ON cv.complaint_pk = c.id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY c.created_at DESC`,
+    params
+  );
+
+  const complaints = rows.map(formatAdminComplaintRow);
+  const markers = complaints.filter((item) => item.latitude !== null && item.longitude !== null);
+
+  return {
+    villages,
+    complaints,
+    markers,
+    summary: {
+      total: complaints.length,
+      mapped: markers.length,
+      unmapped: complaints.length - markers.length,
+    },
+  };
 }
 
 module.exports = {
   getActiveVillages,
   createComplaint,
   trackComplaint,
+  submitComplaintFeedback,
   complaintHasImage,
   findComplaintsByMobile,
   getPanchayathVillages,
@@ -361,4 +803,6 @@ module.exports = {
   getAdminComplaintById,
   adminComplaintHasImage,
   updateAdminComplaintStatus,
+  getPublicMapComplaints,
+  getAdminMapComplaints,
 };

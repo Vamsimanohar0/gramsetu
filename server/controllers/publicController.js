@@ -1,8 +1,11 @@
 const complaintService = require('../services/complaintService');
+const votingService = require('../services/votingService');
 const {
   validateCreateComplaint,
   validateTrackComplaint,
   validateLookupMobile,
+  validateFeedbackSubmit,
+  validateVoteAction,
 } = require('../validators/complaintValidator');
 const {
   collectUploadedFiles,
@@ -74,6 +77,134 @@ async function trackComplaint(req, res, next) {
       status: 'success',
       complaint: result.complaint,
       updates: result.updates,
+      feedback: result.feedback || null,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function submitFeedback(req, res, next) {
+  try {
+    const validation = validateFeedbackSubmit(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({
+        status: 'error',
+        message: validation.message,
+      });
+    }
+
+    const result = await complaintService.submitComplaintFeedback(validation.data);
+    return res.json({
+      status: 'success',
+      message: result.reopened
+        ? 'Complaint reopened and routed back to Panchayat review.'
+        : result.corrected
+          ? 'Feedback updated successfully!'
+          : 'Thank you for submitting your feedback!',
+      complaint_id: result.complaint_id,
+      complaint_status: result.status,
+      reopened: result.reopened,
+      corrected: result.corrected,
+      feedback: result.feedback,
+      updates: result.updates,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function listPublicMapComplaints(req, res, next) {
+  try {
+    const { village_id = '', category = '', status = '' } = req.query;
+    const mapData = await complaintService.getPublicMapComplaints({
+      villageId: village_id,
+      category,
+      status,
+    });
+
+    return res.json({
+      status: 'success',
+      ...mapData,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function getVotingStatus(_req, res) {
+  const availability = votingService.getVotingAvailability();
+  return res.json({
+    status: 'success',
+    voting: availability,
+  });
+}
+
+async function startVoteVerification(req, res, next) {
+  try {
+    const validation = validateVoteAction(
+      { ...req.body, complaint_id: req.params.complaintId || req.body?.complaint_id },
+      { requireToken: false }
+    );
+    if (!validation.valid) {
+      return res.status(400).json({
+        status: 'error',
+        message: validation.message,
+      });
+    }
+
+    const challenge = await votingService.initiateVoteChallenge(validation.data);
+    return res.json({
+      status: 'success',
+      challenge,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function castVote(req, res, next) {
+  try {
+    const validation = validateVoteAction(
+      { ...req.body, complaint_id: req.params.complaintId || req.body?.complaint_id },
+      { requireToken: true }
+    );
+    if (!validation.valid) {
+      return res.status(400).json({
+        status: 'error',
+        message: validation.message,
+      });
+    }
+
+    const result = await votingService.castVerifiedVote(validation.data);
+    return res.status(201).json({
+      status: 'success',
+      message: 'Your vote has been recorded.',
+      ...result,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function withdrawVote(req, res, next) {
+  try {
+    const validation = validateVoteAction(
+      { ...req.body, complaint_id: req.params.complaintId || req.body?.complaint_id },
+      { requireToken: true }
+    );
+    if (!validation.valid) {
+      return res.status(400).json({
+        status: 'error',
+        message: validation.message,
+      });
+    }
+
+    const result = await votingService.withdrawVerifiedVote(validation.data);
+    return res.json({
+      status: 'success',
+      message: 'Your vote has been withdrawn.',
+      ...result,
     });
   } catch (err) {
     return next(err);
@@ -127,7 +258,13 @@ module.exports = {
   listVillages,
   submitComplaint,
   trackComplaint,
+  submitFeedback,
   lookupComplaintsByMobile,
   getCitizenEvidence,
+  listPublicMapComplaints,
+  getVotingStatus,
+  startVoteVerification,
+  castVote,
+  withdrawVote,
 };
 

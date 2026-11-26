@@ -154,6 +154,11 @@ export default function AdminDashboardPage() {
               <span className="badge">{stats.Resolved || 0}</span>
             </Link>
           </li>
+          <li>
+            <Link to="/admin/map">
+              <i className="fas fa-map-marked-alt" /> Complaint Map
+            </Link>
+          </li>
         </ul>
 
         <div className="sidebar-logout">

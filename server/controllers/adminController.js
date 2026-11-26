@@ -36,7 +36,8 @@ async function getComplaint(req, res, next) {
   try {
     const complaint = await complaintService.getAdminComplaintById(
       req.panchayath.id,
-      req.params.id
+      req.params.id,
+      { includeDetails: true }
     );
 
     if (!complaint) {
@@ -68,7 +69,8 @@ async function updateStatus(req, res, next) {
     const updated = await complaintService.updateAdminComplaintStatus(
       req.panchayath.id,
       req.params.id,
-      validation.data.status
+      validation.data.status,
+      validation.data.note
     );
 
     if (!updated) {
@@ -82,6 +84,24 @@ async function updateStatus(req, res, next) {
       status: 'success',
       message: 'Complaint status updated successfully!',
       complaint: updated,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function listAdminMapComplaints(req, res, next) {
+  try {
+    const { village_id = '', category = '', status = '' } = req.query;
+    const mapData = await complaintService.getAdminMapComplaints(req.panchayath.id, {
+      villageId: village_id,
+      category,
+      status,
+    });
+
+    return res.json({
+      status: 'success',
+      ...mapData,
     });
   } catch (err) {
     return next(err);
@@ -110,6 +130,7 @@ module.exports = {
   listComplaints,
   getComplaint,
   updateStatus,
+  listAdminMapComplaints,
   getComplaintEvidence,
 };
 

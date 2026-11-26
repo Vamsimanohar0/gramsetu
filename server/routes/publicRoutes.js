@@ -42,6 +42,20 @@ const lookupMobileLimiter = createSharedRateLimiter({
   message: 'Too many lookups for this mobile number. Please try again after 15 minutes.',
 });
 
+const voteIpLimiter = createSharedRateLimiter({
+  prefix: 'vote_ip:',
+  windowMs: 15 * 60 * 1000,
+  max: 25,
+  message: 'Too many voting requests from this IP. Please try again after 15 minutes.',
+});
+
+const feedbackLimiter = createSharedRateLimiter({
+  prefix: 'feedback:',
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'Too many feedback requests from this IP. Please try again shortly.',
+});
+
 router.get('/villages', publicController.listVillages);
 router.post(
   '/complaints',
@@ -51,6 +65,16 @@ router.post(
   publicController.submitComplaint
 );
 router.post('/complaints/track', trackComplaintLimiter, publicController.trackComplaint);
+router.post('/complaints/feedback', feedbackLimiter, publicController.submitFeedback);
+router.get('/complaints/map', trackComplaintLimiter, publicController.listPublicMapComplaints);
+router.get('/votes/status', publicController.getVotingStatus);
+router.post(
+  '/complaints/:complaintId/votes/challenge',
+  voteIpLimiter,
+  publicController.startVoteVerification
+);
+router.post('/complaints/:complaintId/votes', voteIpLimiter, publicController.castVote);
+router.delete('/complaints/:complaintId/votes', voteIpLimiter, publicController.withdrawVote);
 router.post(
   '/complaints/lookup',
   lookupIpLimiter,
@@ -68,6 +92,8 @@ router.limiters = {
   trackComplaintLimiter,
   lookupIpLimiter,
   lookupMobileLimiter,
+  voteIpLimiter,
+  feedbackLimiter,
 };
 
 module.exports = router;

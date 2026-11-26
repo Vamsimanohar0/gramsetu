@@ -20,6 +20,7 @@ router.use(requirePanchayathAuth);
 router.get('/me', authController.me);
 router.get('/dashboard', adminController.dashboard);
 router.get('/complaints', adminController.listComplaints);
+router.get('/complaints/map', adminController.listAdminMapComplaints);
 router.get('/complaints/:id', adminController.getComplaint);
 router.get('/complaints/:id/evidence/:filename', adminController.getComplaintEvidence);
 router.patch('/complaints/:id/status', adminController.updateStatus);

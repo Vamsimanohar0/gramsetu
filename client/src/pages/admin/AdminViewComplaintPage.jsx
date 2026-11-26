@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { apiRequest, resolveUploadUrl } from '../../services/api';
 import '../../styles/admin-view.css';
+import '../../styles/features.css';
 
 const STATUS_OPTIONS = ['Submitted', 'Verified', 'Assigned', 'In Progress', 'Resolved', 'Rejected'];
 
@@ -25,6 +26,7 @@ export default function AdminViewComplaintPage() {
 
   const [complaint, setComplaint] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState('Submitted');
+  const [statusNote, setStatusNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
@@ -68,10 +70,11 @@ export default function AdminViewComplaintPage() {
     try {
       const res = await apiRequest(`/api/admin/complaints/${id}/status`, {
         method: 'PATCH',
-        body: { status: selectedStatus },
+        body: { status: selectedStatus, note: statusNote.trim() },
       });
       setComplaint(res.complaint);
       setSelectedStatus(res.complaint.status);
+      setStatusNote('');
       setSuccess(res.message || 'Complaint status updated successfully!');
     } catch (err) {
       setError(err.message || 'Failed to update status');
@@ -160,6 +163,18 @@ export default function AdminViewComplaintPage() {
               <div className="label">Submitted On</div>
               <div className="value">{formatDateTime(complaint.created_at)}</div>
             </div>
+            <div className="detail-item">
+              <div className="label">Community Votes</div>
+              <div className="value">{Number(complaint.vote_count || 0)}</div>
+            </div>
+            <div className="detail-item">
+              <div className="label">Pinned Location</div>
+              <div className="value">
+                {complaint.has_location
+                  ? `${Number(complaint.latitude).toFixed(5)}, ${Number(complaint.longitude).toFixed(5)} (${complaint.location_source || 'pin'})`
+                  : 'Not provided'}
+              </div>
+            </div>
             <div className="detail-item full-width">
               <div className="label">Title</div>
               <div className="value">{complaint.title}</div>
@@ -198,6 +213,52 @@ export default function AdminViewComplaintPage() {
           </div>
         )}
 
+        {complaint.feedback && (
+          <div className="card">
+            <h2>
+              <i className="fas fa-star" /> Citizen Feedback
+            </h2>
+            <div className="detail-grid">
+              <div className="detail-item">
+                <div className="label">Rating</div>
+                <div className="value">{complaint.feedback.rating} / 5 Stars</div>
+              </div>
+              <div className="detail-item">
+                <div className="label">Resolution Confirmation</div>
+                <div className="value">
+                  {complaint.feedback.resolution_confirmed
+                    ? 'Confirmed Resolved'
+                    : 'Not Resolved (Reopen Requested)'}
+                </div>
+              </div>
+              {complaint.feedback.comment && (
+                <div className="detail-item full-width">
+                  <div className="label">Citizen Comment</div>
+                  <div className="value">{complaint.feedback.comment}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {Array.isArray(complaint.updates) && complaint.updates.length > 0 && (
+          <div className="card">
+            <h2>
+              <i className="fas fa-history" /> Status History
+            </h2>
+            <div className="admin-timeline-list">
+              {complaint.updates.map((u, idx) => (
+                <div key={u.id || idx} className="admin-timeline-item">
+                  <strong>{u.status}</strong> — {u.remarks}
+                  <small>
+                    Actor: {u.actor_type || 'system'} · {formatDateTime(u.updated_at)}
+                  </small>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="card">
           <h2>
             <i className="fas fa-edit" /> Update Status
@@ -218,6 +279,18 @@ export default function AdminViewComplaintPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="statusNote">Remarks / Action Note (Optional)</label>
+              <input
+                type="text"
+                id="statusNote"
+                maxLength={500}
+                placeholder="Optional note recorded in complaint status history..."
+                value={statusNote}
+                onChange={(e) => setStatusNote(e.target.value)}
+              />
             </div>
 
             <button type="submit" className="btn-primary" disabled={saving}>
