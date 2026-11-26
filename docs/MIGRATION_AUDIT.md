@@ -4,7 +4,11 @@
 **Original PHP Reference:** Git commit `f326545` (preserved in Git history)  
 **Target Stack:** React.js (Vite) + Node.js (Express.js) + MySQL (`mysql2`)
 
-> **Post-Migration Hardening Update:** Legacy PHP files were removed from the working tree in commit `8a02b8c` (remaining preserved in `f326545`). Subsequent security, legacy-data, and parity updates implemented `HttpOnly` cookie-only auth (no `localStorage` JWT), dev-only demo credentials, IP rate limiting, binary JPEG/PNG magic-byte upload validation, and safe/reversible legacy complaint mapping.
+> **Post-Migration Hardening Update:** Legacy PHP files were removed from the working tree in commit `8a02b8c` (remaining preserved in `f326545`). Final security and migration hardening added:
+> - Batch-scoped legacy complaint migration, manual review manifest workflow (`--export-review` / `--apply-manual`), and batch-scoped rollback (`--rollback <batch_id>`).
+> - Production-safe seed separation (`seed.sql` inactive placeholders vs `seed.dev.sql` dev demo accounts) and runtime blocking of shared default/plaintext passwords in `NODE_ENV=production`.
+> - `HttpOnly` cookie-only authentication (no `localStorage` JWT) and dev-only demo credentials (`import.meta.env.DEV`).
+> - MySQL-backed shared `express-rate-limit` store (`rate_limits`), dual IP + per-mobile lookup throttling, PII/title masking against enumeration, binary JPEG/PNG magic-byte upload validation, and private evidence endpoints (`GET /api/complaints/evidence/...` with short-lived scoped tokens & `GET /api/admin/complaints/:id/evidence/...` with Panchayat-scoped cookie auth).
 
 ---
 

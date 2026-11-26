@@ -56,10 +56,42 @@ function parseImagePaths(rawImagePath) {
   return [trimmed];
 }
 
+function maskWord(word, visiblePrefix = 1) {
+  if (!word) return '';
+  if (word.length <= visiblePrefix) return '*'.repeat(word.length);
+  return `${word.slice(0, visiblePrefix)}${'*'.repeat(word.length - visiblePrefix)}`;
+}
+
+function maskPersonName(name) {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) return 'N/A';
+  return trimmed
+    .split(/\s+/)
+    .map((part) => maskWord(part, 1))
+    .join(' ');
+}
+
+function maskMobile(mobile) {
+  const trimmed = String(mobile ?? '').trim();
+  if (trimmed.length <= 4) return '****';
+  return `${'*'.repeat(trimmed.length - 4)}${trimmed.slice(-4)}`;
+}
+
+function maskTitle(title) {
+  const trimmed = String(title ?? '').trim();
+  if (!trimmed) return 'Complaint';
+  return trimmed
+    .split(/\s+/)
+    .map((part) => maskWord(part, Math.min(2, part.length)))
+    .join(' ');
+}
+
 module.exports = {
   ALLOWED_STATUSES,
   ADMIN_UI_STATUSES,
   generateComplaintId,
   parseImagePaths,
+  maskPersonName,
+  maskMobile,
+  maskTitle,
 };
-

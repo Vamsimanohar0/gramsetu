@@ -67,3 +67,11 @@ CREATE TABLE IF NOT EXISTS `complaints` (
   CONSTRAINT `complaints_ibfk_2` FOREIGN KEY (`panchayath_id`) REFERENCES `panchayaths` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE IF NOT EXISTS `rate_limits` (
+  `rate_key` varchar(191) NOT NULL,
+  `hits` int(11) NOT NULL DEFAULT 1,
+  `reset_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`rate_key`),
+  KEY `idx_reset_at` (`reset_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+

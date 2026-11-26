@@ -8,6 +8,8 @@ const {
   collectUploadedFiles,
   cleanupUploadedFiles,
 } = require('../middleware/uploadMiddleware');
+const { verifyCitizenEvidenceToken } = require('../utils/evidenceToken');
+const { sendProtectedEvidenceImage } = require('../utils/fileResponse');
 
 async function listVillages(_req, res, next) {
   try {
@@ -95,10 +97,37 @@ async function lookupComplaintsByMobile(req, res, next) {
   }
 }
 
+async function getCitizenEvidence(req, res, next) {
+  try {
+    const { complaintId, filename } = req.params;
+    const token = String(req.query?.token ?? '');
+
+    if (!verifyCitizenEvidenceToken(token, complaintId, filename)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Invalid or expired evidence access token',
+      });
+    }
+
+    const exists = await complaintService.complaintHasImage(complaintId, filename);
+    if (!exists) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Evidence file not found',
+      });
+    }
+
+    return sendProtectedEvidenceImage(res, filename, next);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listVillages,
   submitComplaint,
   trackComplaint,
   lookupComplaintsByMobile,
+  getCitizenEvidence,
 };
 

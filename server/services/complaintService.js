@@ -1,16 +1,54 @@
+const path = require('path');
 const { pool } = require('../config/db');
 const {
   ALLOWED_STATUSES,
   generateComplaintId,
   parseImagePaths,
+  maskPersonName,
+  maskMobile,
+  maskTitle,
 } = require('../utils/complaintUtils');
+const { signCitizenEvidenceToken } = require('../utils/evidenceToken');
 
-function formatComplaintRow(row) {
+function buildAdminImageUrls(complaintPk, rawImagePath) {
+  return parseImagePaths(rawImagePath).map((imgPath) => {
+    const filename = path.basename(imgPath);
+    return `/api/admin/complaints/${complaintPk}/evidence/${encodeURIComponent(filename)}`;
+  });
+}
+
+function buildCitizenImageUrls(complaintId, rawImagePath) {
+  return parseImagePaths(rawImagePath).map((imgPath) => {
+    const filename = path.basename(imgPath);
+    const token = signCitizenEvidenceToken(complaintId, filename);
+    return `/api/complaints/evidence/${encodeURIComponent(complaintId)}/${encodeURIComponent(filename)}?token=${encodeURIComponent(token)}`;
+  });
+}
+
+function formatAdminComplaintRow(row) {
   if (!row) return null;
   return {
     ...row,
     village: row.village_name || row.village || 'N/A',
-    images: parseImagePaths(row.image_path),
+    images: buildAdminImageUrls(row.id, row.image_path),
+  };
+}
+
+function formatPublicComplaintRow(row) {
+  if (!row) return null;
+  return {
+    complaint_id: row.complaint_id,
+    name: maskPersonName(row.name),
+    mobile: maskMobile(row.mobile),
+    village: row.village_name || row.village || 'N/A',
+    ward_no: row.ward_no || '',
+    category: row.category || 'N/A',
+    title: row.title || '',
+    description: row.description || '',
+    images: buildCitizenImageUrls(row.complaint_id, row.image_path),
+    audio_path: null,
+    status: row.status,
+    created_at: row.created_at,
   };
 }
 
@@ -96,7 +134,7 @@ async function createComplaint(data, uploadedFiles = []) {
 
     return {
       complaint_id: complaintId,
-      images: imagePaths,
+      images: imagePaths.map((p) => path.basename(p)),
     };
   } catch (err) {
     await connection.rollback();
@@ -120,7 +158,7 @@ async function trackComplaint(complaintId, mobile) {
     return null;
   }
 
-  const complaint = formatComplaintRow(rows[0]);
+  const complaint = formatPublicComplaintRow(rows[0]);
   const updates = [
     {
       status: complaint.status,
@@ -133,6 +171,16 @@ async function trackComplaint(complaintId, mobile) {
     complaint,
     updates,
   };
+}
+
+async function complaintHasImage(complaintId, filename) {
+  const [rows] = await pool.execute(
+    'SELECT image_path FROM complaints WHERE complaint_id = ? LIMIT 1',
+    [complaintId]
+  );
+  if (rows.length === 0) return false;
+  const target = path.basename(String(filename || ''));
+  return parseImagePaths(rows[0].image_path).some((p) => path.basename(p) === target);
 }
 
 async function findComplaintsByMobile(mobile) {
@@ -148,7 +196,12 @@ async function findComplaintsByMobile(mobile) {
     [mobile]
   );
 
-  return rows;
+  return rows.map((row) => ({
+    complaint_id: row.complaint_id,
+    title: maskTitle(row.title),
+    status: row.status,
+    created_at: row.created_at,
+  }));
 }
 
 async function getPanchayathVillages(panchayathId) {
@@ -221,7 +274,7 @@ async function getDashboardData(panchayathId) {
     villages,
     stats,
     urgentCount: (stats.Submitted || 0) + (stats.Verified || 0),
-    recentComplaints: recentRows.map(formatComplaintRow),
+    recentComplaints: recentRows.map(formatAdminComplaintRow),
   };
 }
 
@@ -254,7 +307,7 @@ async function getAdminComplaints(panchayathId, { status = '', search = '' } = {
     params
   );
 
-  return rows.map(formatComplaintRow);
+  return rows.map(formatAdminComplaintRow);
 }
 
 async function getAdminComplaintById(panchayathId, id) {
@@ -276,7 +329,14 @@ async function getAdminComplaintById(panchayathId, id) {
     [numericId, ...joinedScope.params]
   );
 
-  return rows.length > 0 ? formatComplaintRow(rows[0]) : null;
+  return rows.length > 0 ? formatAdminComplaintRow(rows[0]) : null;
+}
+
+async function adminComplaintHasImage(panchayathId, id, filename) {
+  const complaint = await getAdminComplaintById(panchayathId, id);
+  if (!complaint) return false;
+  const target = path.basename(String(filename || ''));
+  return parseImagePaths(complaint.image_path).some((p) => path.basename(p) === target);
 }
 
 async function updateAdminComplaintStatus(panchayathId, id, status) {
@@ -293,11 +353,12 @@ module.exports = {
   getActiveVillages,
   createComplaint,
   trackComplaint,
+  complaintHasImage,
   findComplaintsByMobile,
   getPanchayathVillages,
   getDashboardData,
   getAdminComplaints,
   getAdminComplaintById,
+  adminComplaintHasImage,
   updateAdminComplaintStatus,
 };
-

@@ -68,11 +68,17 @@ vgmp/
    C:\xampp\mysql\bin\mysql.exe -u root vgmp < database/migrations/001_verify_integrity.sql
    ```
 
-### Fresh Database Setup
-```powershell
-C:\xampp\mysql\bin\mysql.exe -u root < database/schema.sql
-C:\xampp\mysql\bin\mysql.exe -u root vgmp < database/seed.sql
-```
+### Fresh Database Setup (Production vs Development)
+- **Production-safe reference setup** (`panchayaths` seeded inactive with disabled placeholders):
+  ```powershell
+  mysql -u root -p < database/schema.sql
+  mysql -u root -p vgmp < database/seed.sql
+  ```
+  Generate unique strong bcrypt hashes via `cd server && node scripts/generateHash.js <password>` before activating accounts.
+- **Local development demo accounts ONLY** (`kondapalli` / `guntur` / `narasaraopet` with `'admin'`):
+  ```powershell
+  mysql -u root -p vgmp < database/seed.dev.sql
+  ```
 
 ---
 

@@ -1,9 +1,10 @@
 const path = require('path');
 const dotenv = require('dotenv');
 
+const initialNodeEnv = process.env.NODE_ENV;
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), override: true });
 
-const nodeEnv = process.env.NODE_ENV || 'development';
+const nodeEnv = initialNodeEnv === 'test' ? 'test' : process.env.NODE_ENV || 'development';
 const jwtSecret = process.env.JWT_SECRET || (nodeEnv === 'production' ? '' : 'gramsetu-dev-only-secret-change-in-prod');
 
 if (!jwtSecret) {

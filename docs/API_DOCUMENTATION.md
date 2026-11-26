@@ -70,30 +70,26 @@ Submits a new citizen grievance with optional image evidence (replaces `action/s
   - `429`: Rate limit exceeded.
 
 ### `POST /api/complaints/track`
-Fetches full complaint details by Complaint ID and registered mobile number (replaces `action/track_com.php`).
-- **Authentication:** Public (Rate limited: `30` requests per `15` minutes per IP shared with `/api/complaints/lookup`)
+Fetches sanitized complaint details by Complaint ID and registered mobile number (replaces `action/track_com.php`).
+- **Authentication:** Public (Rate limited via MySQL shared store: `30` requests per `15` minutes per IP)
 - **Request Body (`application/json` or `application/x-www-form-urlencoded`):**
   ```json
   { "complaint_id": "GS-2026-59312", "mobile": "8790808059" }
   ```
-- **Response (`200 OK`):**
+- **Response (`200 OK`):** Masks citizen PII (`name`, `mobile`), omits internal database primary/foreign keys, and returns short-lived (`15m`) signed citizen evidence URLs:
   ```json
   {
     "status": "success",
     "complaint": {
-      "id": 11,
       "complaint_id": "GS-2026-59312",
-      "name": "vamsi",
-      "mobile": "8790808059",
+      "name": "v****",
+      "mobile": "******8059",
       "village": "Kondapalli",
-      "village_id": 1,
-      "panchayath_id": 1,
       "ward_no": "",
       "category": "Garbage Collection",
       "title": "shit",
       "description": "waste",
-      "image_path": null,
-      "images": [],
+      "images": ["/api/complaints/evidence/GS-2026-59312/photo.jpg?token=<jwt>"],
       "audio_path": null,
       "status": "Resolved",
       "created_at": "2026-06-25T11:28:31.000Z"
@@ -109,16 +105,22 @@ Fetches full complaint details by Complaint ID and registered mobile number (rep
   ```
 - **Errors:** `400` missing/invalid Complaint ID or 10-digit mobile number, `404` complaint not found, `429` rate limit exceeded.
 
+### `GET /api/complaints/evidence/:complaintId/:filename?token=...`
+Streams an uploaded evidence image for a citizen who has a valid, short-lived (`15m`) token issued by `POST /api/complaints/track`.
+- **Authentication:** Complaint-and-file-scoped HMAC/JWT `token` query parameter + IP rate limit (`30` per `15m`)
+- **Headers:** `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`
+- **Errors:** `400` invalid filename, `403` invalid/expired token, `404` file not found, `429` rate limit exceeded.
+
 ### `POST /api/complaints/lookup`
-Lists all Complaint IDs registered with a mobile number (replaces `action/find_complaints.php`).
-- **Authentication:** Public (Rate limited: `30` requests per `15` minutes per IP shared with `/api/complaints/track`)
+Lists Complaint IDs registered with a mobile number while masking sensitive titles against enumeration (replaces `action/find_complaints.php`).
+- **Authentication:** Public (Dual rate limit via MySQL shared store: `10` requests per `15` min per IP **and** `5` requests per `15` min per target mobile number)
 - **Request Body:** `{ "mobile": "8790808059" }` (must be 10 digits)
 - **Response (`200 OK`):**
   ```json
   [
     {
       "complaint_id": "GS-2026-17276",
-      "title": "the",
+      "title": "Ro** Da****",
       "status": "Submitted",
       "created_at": "2026-06-26T05:04:14.000Z"
     }
@@ -195,6 +197,12 @@ Returns a single complaint scoped to the logged-in Panchayath's villages (replac
 - **Authentication:** Required (`panchayath_admin`)
 - **Response (`200 OK`):** `{ "status": "success", "complaint": {...} }`
 - **Errors:** `401` unauthenticated, `404` not found or outside Panchayath scope.
+
+### `GET /api/admin/complaints/:id/evidence/:filename`
+Streams an uploaded evidence image for a complaint belonging to the logged-in Panchayath.
+- **Authentication:** Required (`panchayath_admin`, `HttpOnly` cookie)
+- **Headers:** `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`
+- **Errors:** `401` unauthenticated, `404` complaint or image outside Panchayath scope or missing.
 
 ### `PATCH /api/admin/complaints/:id/status`
 Updates the status of a complaint scoped to the logged-in Panchayath's villages (replaces `admin/view_complaint.php` POST).

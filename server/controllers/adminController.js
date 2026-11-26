@@ -1,5 +1,6 @@
 const complaintService = require('../services/complaintService');
 const { validateStatusUpdate } = require('../validators/complaintValidator');
+const { sendProtectedEvidenceImage } = require('../utils/fileResponse');
 
 async function dashboard(req, res, next) {
   try {
@@ -87,10 +88,28 @@ async function updateStatus(req, res, next) {
   }
 }
 
+async function getComplaintEvidence(req, res, next) {
+  try {
+    const { id, filename } = req.params;
+    const allowed = await complaintService.adminComplaintHasImage(req.panchayath.id, id, filename);
+    if (!allowed) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Evidence file not found.',
+      });
+    }
+
+    return sendProtectedEvidenceImage(res, filename, next);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   dashboard,
   listComplaints,
   getComplaint,
   updateStatus,
+  getComplaintEvidence,
 };
 

@@ -27,8 +27,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Serve uploaded complaint evidence files from server/uploads.
-app.use('/uploads', express.static(env.uploadsDir));
+// Uploaded complaint evidence is served only through authorized endpoints, never publicly.
 
 app.get('/test', (_req, res) => {
   res.json({ status: 'ok', message: 'GramSetu backend is running' });
