@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { apiRequest, getStoredToken, setStoredToken } from '../services/api';
+import { apiRequest } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -13,9 +13,6 @@ export function AuthProvider({ children }) {
       setPanchayath(data.panchayath || null);
     } catch {
       setPanchayath(null);
-      if (getStoredToken()) {
-        setStoredToken('');
-      }
     } finally {
       setLoading(false);
     }
@@ -30,9 +27,6 @@ export function AuthProvider({ children }) {
       method: 'POST',
       body: { username, password },
     });
-    if (data.token) {
-      setStoredToken(data.token);
-    }
     setPanchayath(data.panchayath);
     return data.panchayath;
   };
@@ -43,7 +37,6 @@ export function AuthProvider({ children }) {
     } catch {
       // Clear client state even if request fails.
     } finally {
-      setStoredToken('');
       setPanchayath(null);
     }
   };
@@ -62,4 +55,3 @@ export function useAuth() {
   }
   return ctx;
 }
-

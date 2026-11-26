@@ -2,6 +2,7 @@ const complaintService = require('../services/complaintService');
 const {
   validateCreateComplaint,
   validateTrackComplaint,
+  validateLookupMobile,
 } = require('../validators/complaintValidator');
 const {
   collectUploadedFiles,
@@ -79,12 +80,15 @@ async function trackComplaint(req, res, next) {
 
 async function lookupComplaintsByMobile(req, res, next) {
   try {
-    const mobile = String(req.body?.mobile ?? '').trim();
-    if (!mobile) {
-      return res.json([]);
+    const validation = validateLookupMobile(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({
+        status: 'error',
+        message: validation.message,
+      });
     }
 
-    const complaints = await complaintService.findComplaintsByMobile(mobile);
+    const complaints = await complaintService.findComplaintsByMobile(validation.data.mobile);
     return res.json(complaints);
   } catch (err) {
     return next(err);

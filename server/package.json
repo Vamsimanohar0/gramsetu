@@ -7,8 +7,10 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test tests/api.test.js",
+    "test:live": "cmd /c \"set RUN_LIVE_DB_TESTS=1 && node --test tests/live.test.js\"",
     "hash-passwords": "node scripts/hashPasswords.js",
-    "generate-hash": "node scripts/generateHash.js"
+    "generate-hash": "node scripts/generateHash.js",
+    "migrate-legacy": "node scripts/migrateLegacyComplaints.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

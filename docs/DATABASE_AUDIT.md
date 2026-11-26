@@ -92,6 +92,9 @@ panchayaths (1) ──────< (N) villages
 complaints (N) >─────────────┘
 ```
 
-1. **Legacy vs. Normalized Complaints:** Rows `1–9` in `complaints` have `village` as plain text and `village_id = NULL`, `panchayath_id = NULL`. Rows `10–12` have `village = NULL` and valid `village_id` + `panchayath_id` FKs. The migrated backend preserves all 12 rows untouched and resolves display village via `COALESCE(v.name, c.village)`.
+1. **Legacy vs. Normalized Complaints:** Rows `1–9` in `complaints` have `village` as plain text (`'hjgf'`, `'kaza'`, `'guntur'`, `''`) and `village_id = NULL`, `panchayath_id = NULL`. Rows `10–12` have `village = NULL` and valid `village_id` + `panchayath_id` FKs.
+   - All `12` existing rows and their original `id` / `complaint_id` values are preserved untouched.
+   - Safe, idempotent, reversible migration [`database/migrations/002_map_legacy_complaints.sql`](file:///c:/xampp/htdocs/vgmp/database/migrations/002_map_legacy_complaints.sql) (and [`server/scripts/migrateLegacyComplaints.js`](file:///c:/xampp/htdocs/vgmp/server/scripts/migrateLegacyComplaints.js)) maps only unambiguous active village matches (`COUNT = 1`, e.g. row `9` `'guntur'` → `village_id = 4, panchayath_id = 2`), skips ambiguous (`> 1` matches) or unmatched rows (`'hjgf'`, `'kaza'`), and logs pre-update NULLs in `legacy_complaint_mapping_audit` for [`database/migrations/002_rollback_legacy_complaints.sql`](file:///c:/xampp/htdocs/vgmp/database/migrations/002_rollback_legacy_complaints.sql).
+   - Panchayat-scoped admin queries in [`server/services/complaintService.js`](file:///c:/xampp/htdocs/vgmp/server/services/complaintService.js) match `(panchayath_id = ? OR village_id IN (...))` and resolve display village via `COALESCE(v.name, c.village)`.
 2. **Password Handling:** Existing `panchayaths` rows store `'admin'` in plaintext. The Express backend verifies both bcrypt hashes (including PHP `$2y$` prefix) and legacy plaintext passwords, automatically upgrading plaintext rows to bcrypt on successful login.
 3. **Status Enum:** Preserves all 6 enum values (`Submitted`, `Verified`, `Assigned`, `In Progress`, `Resolved`, `Rejected`).

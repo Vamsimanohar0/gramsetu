@@ -1,8 +1,10 @@
 # GramSetu (VGMP) — Migration Audit
 
 **Audit Date:** 2026-11-26  
-**Source Branch:** `main` (commit `f326545`)  
+**Original PHP Reference:** Git commit `f326545` (preserved in Git history)  
 **Target Stack:** React.js (Vite) + Node.js (Express.js) + MySQL (`mysql2`)
+
+> **Post-Migration Hardening Update:** Legacy PHP files were removed from the working tree in commit `8a02b8c` (remaining preserved in `f326545`). Subsequent security, legacy-data, and parity updates implemented `HttpOnly` cookie-only auth (no `localStorage` JWT), dev-only demo credentials, IP rate limiting, binary JPEG/PNG magic-byte upload validation, and safe/reversible legacy complaint mapping.
 
 ---
 

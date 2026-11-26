@@ -45,7 +45,7 @@ Returns all active villages with their mapped Panchayath name (replaces inline S
 
 ### `POST /api/complaints`
 Submits a new citizen grievance with optional image evidence (replaces `action/submit_complaint.php`).
-- **Authentication:** Public
+- **Authentication:** Public (Rate limited: `10` requests per `15` minutes per IP)
 - **Content-Type:** `multipart/form-data`
 - **Form Fields:**
   - `name` (string, required, max 100)
@@ -55,7 +55,7 @@ Submits a new citizen grievance with optional image evidence (replaces `action/s
   - `category` (string, required, max 100)
   - `title` (string, required, max 255)
   - `description` (string, required, max 1000)
-  - `images[]` or `images` (up to 6 `.jpg`, `.jpeg`, or `.png` files, max 5 MB each)
+  - `images[]` or `images` (up to 6 `.jpg`, `.jpeg`, or `.png` files, max 5 MB each; verified by binary JPEG/PNG magic bytes)
 - **Response (`201 Created`):**
   ```json
   {
@@ -66,11 +66,12 @@ Submits a new citizen grievance with optional image evidence (replaces `action/s
   }
   ```
 - **Errors:**
-  - `400`: Missing required fields, invalid 10-digit mobile number, invalid village, invalid file type, >6 files, or file >5 MB.
+  - `400`: Missing required fields, invalid 10-digit mobile number, invalid village, invalid file extension/MIME/magic bytes, >6 files, or file >5 MB.
+  - `429`: Rate limit exceeded.
 
 ### `POST /api/complaints/track`
 Fetches full complaint details by Complaint ID and registered mobile number (replaces `action/track_com.php`).
-- **Authentication:** Public
+- **Authentication:** Public (Rate limited: `30` requests per `15` minutes per IP shared with `/api/complaints/lookup`)
 - **Request Body (`application/json` or `application/x-www-form-urlencoded`):**
   ```json
   { "complaint_id": "GS-2026-59312", "mobile": "8790808059" }
@@ -106,12 +107,12 @@ Fetches full complaint details by Complaint ID and registered mobile number (rep
     ]
   }
   ```
-- **Errors:** `400` missing fields, `404` complaint not found.
+- **Errors:** `400` missing/invalid Complaint ID or 10-digit mobile number, `404` complaint not found, `429` rate limit exceeded.
 
 ### `POST /api/complaints/lookup`
 Lists all Complaint IDs registered with a mobile number (replaces `action/find_complaints.php`).
-- **Authentication:** Public
-- **Request Body:** `{ "mobile": "8790808059" }`
+- **Authentication:** Public (Rate limited: `30` requests per `15` minutes per IP shared with `/api/complaints/track`)
+- **Request Body:** `{ "mobile": "8790808059" }` (must be 10 digits)
 - **Response (`200 OK`):**
   ```json
   [
@@ -123,22 +124,22 @@ Lists all Complaint IDs registered with a mobile number (replaces `action/find_c
     }
   ]
   ```
+- **Errors:** `400` invalid 10-digit mobile number, `429` rate limit exceeded.
 
 ---
 
 ## Panchayat Admin Endpoints
 
-Authentication uses an `httpOnly` cookie (`gramsetu_token`) and/or `Authorization: Bearer <token>` JWT.
+Authentication uses an `HttpOnly`, `SameSite=Lax` cookie (`gramsetu_token`) exclusively (JWTs are never returned in JSON or stored in `localStorage`).
 
 ### `POST /api/admin/login`
 Authenticates an active Panchayath user (replaces `admin/login.php`).
-- **Authentication:** Public
+- **Authentication:** Public (Rate limited: `15` requests per `15` minutes per IP)
 - **Request Body:** `{ "username": "kondapalli", "password": "admin" }`
-- **Response (`200 OK`):**
+- **Response (`200 OK`):** Sets `HttpOnly` cookie `gramsetu_token` and returns:
   ```json
   {
     "status": "success",
-    "token": "<jwt>",
     "panchayath": {
       "id": 1,
       "name": "Kondapalli Panchayath",
@@ -148,7 +149,7 @@ Authenticates an active Panchayath user (replaces `admin/login.php`).
     }
   }
   ```
-- **Errors:** `400` missing credentials, `401` invalid username or password.
+- **Errors:** `400` missing credentials, `401` invalid username or password, `429` rate limit exceeded.
 
 ### `POST /api/admin/logout`
 Clears the session cookie (replaces `admin/logout.php`).

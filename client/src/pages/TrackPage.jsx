@@ -50,6 +50,7 @@ export default function TrackPage() {
 
   const [searchMobile, setSearchMobile] = useState('');
   const [lookupResults, setLookupResults] = useState(null);
+  const [lookupError, setLookupError] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
 
   const [rating, setRating] = useState(4);
@@ -105,15 +106,24 @@ export default function TrackPage() {
   };
 
   const handleLookupByMobile = async () => {
+    const trimmedMobile = searchMobile.trim();
+    if (!/^[0-9]{10}$/.test(trimmedMobile)) {
+      setLookupError('Please enter a valid 10-digit mobile number');
+      setLookupResults(null);
+      return;
+    }
+
+    setLookupError('');
     setLookupLoading(true);
     try {
       const data = await apiRequest('/api/complaints/lookup', {
         method: 'POST',
-        body: { mobile: searchMobile.trim() },
+        body: { mobile: trimmedMobile },
       });
       setLookupResults(Array.isArray(data) ? data : []);
-    } catch {
-      setLookupResults([]);
+    } catch (err) {
+      setLookupError(err.message || 'Unable to look up complaints.');
+      setLookupResults(null);
     } finally {
       setLookupLoading(false);
     }
@@ -261,7 +271,10 @@ export default function TrackPage() {
             </button>
 
             <div id="complaintList" className="mt-1">
-              {lookupResults !== null && lookupResults.length === 0 && <p>No complaints found.</p>}
+              {lookupError && <p style={{ color: '#ff6b6b' }}>{lookupError}</p>}
+              {!lookupError && lookupResults !== null && lookupResults.length === 0 && (
+                <p>No complaints found.</p>
+              )}
               {lookupResults !== null &&
                 lookupResults.map((c) => (
                   <div

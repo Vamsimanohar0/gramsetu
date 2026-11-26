@@ -159,6 +159,21 @@ async function getPanchayathVillages(panchayathId) {
   return rows;
 }
 
+function buildPanchayathScopeClause(panchayathId, villageIds, alias = '') {
+  const prefix = alias ? `${alias}.` : '';
+  if (villageIds.length === 0) {
+    return {
+      clause: `${prefix}panchayath_id = ?`,
+      params: [panchayathId],
+    };
+  }
+  const placeholders = villageIds.map(() => '?').join(',');
+  return {
+    clause: `(${prefix}panchayath_id = ? OR ${prefix}village_id IN (${placeholders}))`,
+    params: [panchayathId, ...villageIds],
+  };
+}
+
 async function getDashboardData(panchayathId) {
   const villages = await getPanchayathVillages(panchayathId);
   const villageIds = villages.map((v) => v.id);
@@ -173,23 +188,15 @@ async function getDashboardData(panchayathId) {
     Rejected: 0,
   };
 
-  if (villageIds.length === 0) {
-    return {
-      villages: [],
-      stats: emptyStats,
-      urgentCount: 0,
-      recentComplaints: [],
-    };
-  }
-
-  const placeholders = villageIds.map(() => '?').join(',');
+  const scope = buildPanchayathScopeClause(panchayathId, villageIds);
+  const joinedScope = buildPanchayathScopeClause(panchayathId, villageIds, 'c');
 
   const [statusRows] = await pool.execute(
     `SELECT status, COUNT(*) AS count
      FROM complaints
-     WHERE village_id IN (${placeholders})
+     WHERE ${scope.clause}
      GROUP BY status`,
-    villageIds
+    scope.params
   );
 
   const stats = { ...emptyStats };
@@ -201,13 +208,13 @@ async function getDashboardData(panchayathId) {
   }
 
   const [recentRows] = await pool.execute(
-    `SELECT c.*, v.name AS village_name
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     WHERE c.village_id IN (${placeholders})
+     WHERE ${joinedScope.clause}
      ORDER BY c.created_at DESC
      LIMIT 10`,
-    villageIds
+    joinedScope.params
   );
 
   return {
@@ -222,13 +229,9 @@ async function getAdminComplaints(panchayathId, { status = '', search = '' } = {
   const villages = await getPanchayathVillages(panchayathId);
   const villageIds = villages.map((v) => v.id);
 
-  if (villageIds.length === 0) {
-    return [];
-  }
-
-  const placeholders = villageIds.map(() => '?').join(',');
-  const conditions = [`c.village_id IN (${placeholders})`];
-  const params = [...villageIds];
+  const joinedScope = buildPanchayathScopeClause(panchayathId, villageIds, 'c');
+  const conditions = [joinedScope.clause];
+  const params = [...joinedScope.params];
 
   if (status && ALLOWED_STATUSES.includes(status)) {
     conditions.push('c.status = ?');
@@ -243,7 +246,7 @@ async function getAdminComplaints(panchayathId, { status = '', search = '' } = {
   }
 
   const [rows] = await pool.execute(
-    `SELECT c.*, v.name AS village_name
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
      WHERE ${conditions.join(' AND ')}
@@ -262,18 +265,15 @@ async function getAdminComplaintById(panchayathId, id) {
 
   const villages = await getPanchayathVillages(panchayathId);
   const villageIds = villages.map((v) => v.id);
-  if (villageIds.length === 0) {
-    return null;
-  }
+  const joinedScope = buildPanchayathScopeClause(panchayathId, villageIds, 'c');
 
-  const placeholders = villageIds.map(() => '?').join(',');
   const [rows] = await pool.execute(
     `SELECT c.*, COALESCE(v.name, c.village) AS village_name
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     WHERE c.id = ? AND c.village_id IN (${placeholders})
+     WHERE c.id = ? AND ${joinedScope.clause}
      LIMIT 1`,
-    [numericId, ...villageIds]
+    [numericId, ...joinedScope.params]
   );
 
   return rows.length > 0 ? formatComplaintRow(rows[0]) : null;

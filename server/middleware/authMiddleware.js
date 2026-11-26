@@ -3,10 +3,6 @@ const env = require('../config/env');
 const { pool } = require('../config/db');
 
 function extractToken(req) {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.slice(7).trim();
-  }
   if (req.cookies && req.cookies[env.cookieName]) {
     return req.cookies[env.cookieName];
   }

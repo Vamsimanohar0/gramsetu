@@ -38,7 +38,6 @@ async function login(req, res, next) {
     res.cookie(env.cookieName, result.token, getCookieOptions());
     return res.json({
       status: 'success',
-      token: result.token,
       panchayath: result.panchayath,
     });
   } catch (err) {
@@ -47,7 +46,8 @@ async function login(req, res, next) {
 }
 
 async function logout(_req, res) {
-  res.clearCookie(env.cookieName, { path: '/' });
+  const { maxAge: _unused, ...clearOptions } = getCookieOptions();
+  res.clearCookie(env.cookieName, clearOptions);
   return res.json({
     status: 'success',
     message: 'Logged out successfully',

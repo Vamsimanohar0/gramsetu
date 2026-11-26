@@ -21,7 +21,33 @@ If your `vgmp` database already exists in MySQL/MariaDB with your `panchayaths`,
   C:\xampp\mysql\bin\mysql.exe -u root vgmp < database/migrations/001_verify_integrity.sql
   ```
 
-## 3. Fresh Setup (New Environment)
+## 3. Legacy Complaint Data Migration (Safe & Reversible)
+
+Legacy complaints submitted before `village_id` normalization may have `village` populated as text while `village_id` and `panchayath_id` are `NULL`.
+
+1. **Take a backup first** (Section 1 above).
+2. **Dry-run classification** (read-only, from `server/`):
+   ```bash
+   node scripts/migrateLegacyComplaints.js
+   ```
+   This reports:
+   - Unambiguous matches (exact 1 active village match)
+   - Ambiguous village names (>1 active match — skipped for manual review)
+   - Unmatched/empty rows — preserved untouched with original IDs
+3. **Apply migration** (either via Node or SQL):
+   ```bash
+   node scripts/migrateLegacyComplaints.js --apply
+   ```
+   Or via MySQL:
+   ```powershell
+   C:\xampp\mysql\bin\mysql.exe -u root -p vgmp < database/migrations/002_map_legacy_complaints.sql
+   ```
+4. **Rollback if needed:**
+   ```powershell
+   C:\xampp\mysql\bin\mysql.exe -u root -p vgmp < database/migrations/002_rollback_legacy_complaints.sql
+   ```
+
+## 4. Fresh Setup (New Environment)
 
 ```bash
 mysql -u root -p < database/schema.sql

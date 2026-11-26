@@ -1,5 +1,8 @@
 const { ALLOWED_STATUSES } = require('../utils/complaintUtils');
 
+const MOBILE_REGEX = /^[0-9]{10}$/;
+const COMPLAINT_ID_REGEX = /^[A-Za-z0-9-]{4,20}$/;
+
 function validateCreateComplaint(body = {}) {
   const name = String(body.name ?? '').trim();
   const mobile = String(body.mobile ?? '').trim();
@@ -16,7 +19,7 @@ function validateCreateComplaint(body = {}) {
     };
   }
 
-  if (!/^[0-9]{10}$/.test(mobile)) {
+  if (!MOBILE_REGEX.test(mobile)) {
     return {
       valid: false,
       message: 'Please enter a valid 10-digit mobile number',
@@ -64,9 +67,37 @@ function validateTrackComplaint(body = {}) {
     };
   }
 
+  if (!COMPLAINT_ID_REGEX.test(complaintId)) {
+    return {
+      valid: false,
+      message: 'Please enter a valid Complaint ID',
+    };
+  }
+
+  if (!MOBILE_REGEX.test(mobile)) {
+    return {
+      valid: false,
+      message: 'Please enter a valid 10-digit mobile number',
+    };
+  }
+
   return {
     valid: true,
     data: { complaintId, mobile },
+  };
+}
+
+function validateLookupMobile(body = {}) {
+  const mobile = String(body.mobile ?? '').trim();
+  if (!MOBILE_REGEX.test(mobile)) {
+    return {
+      valid: false,
+      message: 'Please enter a valid 10-digit mobile number',
+    };
+  }
+  return {
+    valid: true,
+    data: { mobile },
   };
 }
 
@@ -78,6 +109,13 @@ function validateLogin(body = {}) {
     return {
       valid: false,
       message: 'Please fill in all fields',
+    };
+  }
+
+  if (username.length > 50 || password.length > 255) {
+    return {
+      valid: false,
+      message: 'Invalid username or password',
     };
   }
 
@@ -101,7 +139,7 @@ function validateStatusUpdate(body = {}) {
 module.exports = {
   validateCreateComplaint,
   validateTrackComplaint,
+  validateLookupMobile,
   validateLogin,
   validateStatusUpdate,
 };
-

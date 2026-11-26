@@ -113,14 +113,16 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          <div className="demo-credentials">
-            <i className="fas fa-info-circle" style={{ color: '#7DFF6A' }} /> Demo Credentials:
-            <div className="creds">
-              <span>kondapalli / admin</span>
-              <span>guntur / admin</span>
-              <span>narasaraopet / admin</span>
+          {import.meta.env.DEV && (
+            <div className="demo-credentials">
+              <i className="fas fa-info-circle" style={{ color: '#7DFF6A' }} /> Demo Credentials:
+              <div className="creds">
+                <span>kondapalli / admin</span>
+                <span>guntur / admin</span>
+                <span>narasaraopet / admin</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
