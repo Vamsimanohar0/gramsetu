@@ -7,6 +7,7 @@ import '../../styles/admin-dashboard.css';
 const CHART_ITEMS = [
   { label: 'Submitted', color: '#f9b84a' },
   { label: 'Verified', color: '#3498db' },
+  { label: 'Assigned', color: '#38bdf8' },
   { label: 'In Progress', color: '#7DFF6A' },
   { label: 'Resolved', color: '#2ecc71' },
   { label: 'Rejected', color: '#ff6b6b' },
@@ -91,6 +92,7 @@ export default function AdminDashboardPage() {
     total: 0,
     Submitted: 0,
     Verified: 0,
+    Assigned: 0,
     'In Progress': 0,
     Resolved: 0,
     Rejected: 0,
@@ -101,6 +103,7 @@ export default function AdminDashboardPage() {
     1,
     stats.Submitted || 0,
     stats.Verified || 0,
+    stats.Assigned || 0,
     stats['In Progress'] || 0,
     stats.Resolved || 0,
     stats.Rejected || 0
