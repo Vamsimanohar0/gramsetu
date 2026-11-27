@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { apiRequest } from '../../services/api';
-import '../../styles/admin-complaints.css';
+import AdminLayout from '../../components/AdminLayout';
 
 const FILTER_STATUSES = ['', 'Submitted', 'Verified', 'Assigned', 'In Progress', 'Resolved', 'Rejected'];
 
@@ -72,37 +72,11 @@ export default function AdminComplaintsPage() {
   };
 
   return (
-    <div className="page-admin-complaints">
-      <div className="container">
-        <div className="header">
-          <div>
-            <Link to="/admin/dashboard" className="back-link">
-              <i className="fas fa-arrow-left" /> Dashboard
-            </Link>
-            <h1>
-              All <span>Complaints</span>
-            </h1>
-          </div>
-          <div className="search-box">
-            <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <Link to="/admin/map" className="back-link" style={{ margin: 0, whiteSpace: 'nowrap' }}>
-                <i className="fas fa-map-marked-alt" /> Map
-              </Link>
-              <input
-                type="text"
-                name="search"
-                placeholder="Search by name, ID, mobile..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
-              <button type="submit" aria-label="Search">
-                <i className="fas fa-search" />
-              </button>
-            </form>
-          </div>
-        </div>
-
-        <div className="filters">
+    <AdminLayout
+      subtitle={`Manage and filter complaints${statusFilter ? ` · Filter: ${statusFilter}` : ''}`}
+    >
+      <div className="admin-toolbar-row">
+        <div className="admin-pill-tabs">
           {FILTER_STATUSES.map((st) => {
             const label = st || 'All';
             const isActive = statusFilter === st;
@@ -110,7 +84,7 @@ export default function AdminComplaintsPage() {
               <Link
                 key={label}
                 to={buildFilterTarget(st)}
-                className={`filter-btn${isActive ? ' active' : ''}`}
+                className={`admin-pill${isActive ? ' active' : ''}`}
               >
                 {label}
               </Link>
@@ -118,19 +92,44 @@ export default function AdminComplaintsPage() {
           })}
         </div>
 
-        <div className="table-container">
-          {loading ? (
-            <div className="empty-state">
-              <i className="fas fa-spinner fa-spin" />
-              <p>Loading complaints...</p>
-            </div>
-          ) : error ? (
-            <div className="empty-state">
-              <i className="fas fa-exclamation-circle" style={{ color: '#ff6b6b' }} />
-              <p style={{ color: '#ff6b6b' }}>{error}</p>
-            </div>
-          ) : complaints.length > 0 ? (
-            <table>
+        <form className="admin-search-pill" onSubmit={handleSearchSubmit}>
+          <i className="fas fa-search" />
+          <input
+            type="text"
+            name="search"
+            placeholder="Search by name, ID, mobile..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          <button type="submit" aria-label="Search">
+            Search
+          </button>
+        </form>
+      </div>
+
+      <section className="admin-glass-card">
+        <div className="admin-card-head">
+          <h2 className="admin-card-title">
+            All Complaints ({loading ? '...' : complaints.length})
+          </h2>
+          <Link to="/admin/map" className="admin-mini-pill">
+            <i className="fas fa-map-marked-alt" /> Open Map View
+          </Link>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--text-secondary)' }}>
+            <i className="fas fa-spinner fa-spin" style={{ color: 'var(--accent-soft)', fontSize: '24px' }} />
+            <p style={{ marginTop: '10px' }}>Loading complaints...</p>
+          </div>
+        ) : error ? (
+          <div className="admin-alert error">
+            <i className="fas fa-exclamation-circle" />
+            <span>{error}</span>
+          </div>
+        ) : complaints.length > 0 ? (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
               <thead>
                 <tr>
                   <th>ID</th>
@@ -154,11 +153,11 @@ export default function AdminComplaintsPage() {
                       <td>{row.village || 'N/A'}</td>
                       <td>{row.category}</td>
                       <td>
-                        <span className={`status-badge ${statusClass}`}>{row.status}</span>
+                        <span className={`admin-status-badge ${statusClass}`}>{row.status}</span>
                       </td>
                       <td>{formatShortDate(row.created_at)}</td>
                       <td>
-                        <Link to={`/admin/complaints/${row.id}`} className="view-btn">
+                        <Link to={`/admin/complaints/${row.id}`} className="admin-action-link">
                           View
                         </Link>
                       </td>
@@ -167,18 +166,17 @@ export default function AdminComplaintsPage() {
                 })}
               </tbody>
             </table>
-          ) : (
-            <div className="empty-state">
-              <i className="fas fa-inbox" />
-              <h3>No complaints found</h3>
-              <p style={{ color: '#8a9bb5' }}>
-                {statusFilter ? `No ${statusFilter} complaints` : 'No complaints from your villages yet'}
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '44px 0', color: 'var(--text-secondary)' }}>
+            <i className="fas fa-inbox" style={{ fontSize: '36px', marginBottom: '12px', display: 'block', opacity: 0.6 }} />
+            <h3>No complaints found</h3>
+            <p style={{ marginTop: '4px', fontSize: '13px' }}>
+              {statusFilter ? `No ${statusFilter} complaints` : 'No complaints from your villages yet'}
+            </p>
+          </div>
+        )}
+      </section>
+    </AdminLayout>
   );
 }
-
