@@ -23,9 +23,12 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 *.sql
+<<<<<<< HEAD
 
 # Database backups
 *.sql.bak
 *.dump
 *.sql.gz
 vgmp_backup_*.sql
+=======
+>>>>>>> 07b6f9d5ad6d14893ffc239b4d6aec332b228173
