@@ -104,12 +104,10 @@ CREATE TABLE IF NOT EXISTS `complaint_feedback` (
 CREATE TABLE IF NOT EXISTS `complaint_votes` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `complaint_pk` int(11) NOT NULL,
-  `voter_mobile_hmac` char(64) NOT NULL,
-  `verification_method` varchar(32) NOT NULL,
-  `verified_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `voter_key_hmac` char(64) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_complaint_voter` (`complaint_pk`, `voter_mobile_hmac`),
+  UNIQUE KEY `uq_complaint_voter` (`complaint_pk`, `voter_key_hmac`),
   KEY `idx_cv_complaint` (`complaint_pk`),
   CONSTRAINT `fk_cv_complaint` FOREIGN KEY (`complaint_pk`) REFERENCES `complaints` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

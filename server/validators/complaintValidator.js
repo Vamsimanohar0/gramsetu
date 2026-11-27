@@ -208,33 +208,17 @@ function validateFeedbackSubmit(body = {}) {
   };
 }
 
-function validateVoteAction(body = {}, { requireToken = true } = {}) {
+function validateVoteAction(body = {}) {
   const complaintId = String(body.complaint_id ?? '').trim();
-  const mobile = normalizeMobileNumber(body.mobile);
-  const verificationToken = String(body.verification_token ?? '').trim();
 
   if (!complaintId || !COMPLAINT_ID_REGEX.test(complaintId)) {
     return { valid: false, message: 'Please enter a valid Complaint ID.' };
-  }
-
-  if (!MOBILE_REGEX.test(mobile)) {
-    return { valid: false, message: 'Please enter a valid 10-digit mobile number.' };
-  }
-
-  if (requireToken && !verificationToken) {
-    return { valid: false, message: 'Mobile verification token is required before voting.' };
-  }
-
-  if (verificationToken.length > 255) {
-    return { valid: false, message: 'Invalid verification token format.' };
   }
 
   return {
     valid: true,
     data: {
       complaintId,
-      mobile,
-      verificationToken,
     },
   };
 }

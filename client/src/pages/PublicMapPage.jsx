@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import ComplaintClusterMap from '../components/ComplaintClusterMap';
 import { apiRequest } from '../services/api';
+import { isVoteEligibleStatus } from '../utils/statusProgress';
 import '../styles/track.css';
 import '../styles/features.css';
 
@@ -29,7 +30,8 @@ export default function PublicMapPage() {
     markers: [],
     summary: { total: 0, mapped: 0, unmapped: 0 },
   });
-  const [votingStatus, setVotingStatus] = useState({ enabled: false, message: '' });
+  const [votingId, setVotingId] = useState('');
+  const [voteFeedback, setVoteFeedback] = useState({ type: '', text: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tileError, setTileError] = useState(false);
@@ -39,12 +41,6 @@ export default function PublicMapPage() {
     apiRequest('/api/villages')
       .then((res) => setVillages(Array.isArray(res.villages) ? res.villages : []))
       .catch(() => setVillages([]));
-
-    apiRequest('/api/votes/status')
-      .then((res) => {
-        if (res.voting) setVotingStatus(res.voting);
-      })
-      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -172,15 +168,18 @@ export default function PublicMapPage() {
               <div>
                 <strong style={{ color: '#e9fff2' }}>Community Support Voting</strong>
                 <p style={{ color: '#a8bbd8', fontSize: '0.86rem', marginTop: '4px' }}>
-                  {votingStatus.message ||
-                    'Community voting requires mobile OTP verification (disabled until an SMS provider is configured).'}
+                  Citizens can support active public complaints below (one vote per complaint per browser, no account or login required).
                 </p>
               </div>
               <span className="vote-count-pill">
-                <i className={votingStatus.enabled ? 'fas fa-thumbs-up' : 'fas fa-lock'} />
-                {votingStatus.enabled ? 'Verified Voting Active' : 'OTP Verification Pending'}
+                <i className="fas fa-thumbs-up" /> Open Community Voting
               </span>
             </div>
+            {voteFeedback.text && (
+              <div className={`feedback-notice ${voteFeedback.type}`} style={{ marginTop: '8px' }}>
+                {voteFeedback.text}
+              </div>
+            )}
           </div>
 
           <div style={{ marginTop: '20px' }}>
@@ -193,43 +192,89 @@ export default function PublicMapPage() {
               <p style={{ color: '#a8bbd8' }}>No complaints match the selected filters.</p>
             ) : (
               <div className="gs-complaint-cards">
-                {mapData.complaints.map((item) => (
-                  <div key={item.complaint_id} className="gs-complaint-card">
-                    <div className="gs-complaint-card-top">
-                      <strong style={{ color: '#7DFF6A' }}>{item.complaint_id}</strong>
-                      <span className="badge">{item.status}</span>
+                {mapData.complaints.map((item) => {
+                  const eligible = isVoteEligibleStatus(item.status);
+                  const isBusy = votingId === item.complaint_id;
+                  return (
+                    <div key={item.complaint_id} className="gs-complaint-card">
+                      <div className="gs-complaint-card-top">
+                        <strong style={{ color: '#7DFF6A' }}>{item.complaint_id}</strong>
+                        <span className="badge">{item.status}</span>
+                      </div>
+                      <h4>{item.title}</h4>
+                      <p>
+                        {item.village} · {item.category}
+                      </p>
+                      <p>
+                        {item.has_location ? 'Approx. map pin available' : 'Submitted without map pin'} · Votes:{' '}
+                        <strong>{item.vote_count}</strong>
+                      </p>
+                      <div className="vote-meta-row" style={{ marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '0.4rem 0.9rem', fontSize: '0.82rem', opacity: eligible ? 1 : 0.55 }}
+                          disabled={!eligible || isBusy}
+                          title={
+                            eligible
+                              ? item.user_voted
+                                ? 'Click to withdraw your support vote'
+                                : 'Support this complaint'
+                              : 'Voting is only open for active unresolved complaints'
+                          }
+                          onClick={async () => {
+                            if (!eligible || votingId) return;
+                            setVotingId(item.complaint_id);
+                            setVoteFeedback({ type: '', text: '' });
+                            try {
+                              const res = await apiRequest(
+                                `/api/complaints/${encodeURIComponent(item.complaint_id)}/votes`,
+                                { method: item.user_voted ? 'DELETE' : 'POST' }
+                              );
+                              setMapData((prev) => ({
+                                ...prev,
+                                complaints: prev.complaints.map((c) =>
+                                  c.complaint_id === item.complaint_id
+                                    ? { ...c, vote_count: res.vote_count, user_voted: res.user_voted }
+                                    : c
+                                ),
+                                markers: prev.markers.map((m) =>
+                                  m.complaint_id === item.complaint_id
+                                    ? { ...m, vote_count: res.vote_count, user_voted: res.user_voted }
+                                    : m
+                                ),
+                              }));
+                              setVoteFeedback({
+                                type: 'success',
+                                text: res.message || 'Support vote updated.',
+                              });
+                            } catch (err) {
+                              setVoteFeedback({
+                                type: 'error',
+                                text: err.message || 'Unable to update vote.',
+                              });
+                            } finally {
+                              setVotingId('');
+                            }
+                          }}
+                        >
+                          <i className="fas fa-thumbs-up" />{' '}
+                          {isBusy
+                            ? 'Saving...'
+                            : item.user_voted
+                              ? `Supported (${item.vote_count})`
+                              : `Support (${item.vote_count})`}
+                        </button>
+                        <Link
+                          to={`/track?id=${encodeURIComponent(item.complaint_id)}`}
+                          style={{ color: '#7DFF6A', fontSize: '0.84rem' }}
+                        >
+                          Track Status →
+                        </Link>
+                      </div>
                     </div>
-                    <h4>{item.title}</h4>
-                    <p>
-                      {item.village} · {item.category}
-                    </p>
-                    <p>
-                      {item.has_location ? 'Approx. map pin available' : 'Submitted without map pin'} · Votes:{' '}
-                      <strong>{item.vote_count}</strong>
-                    </p>
-                    <div className="vote-meta-row" style={{ marginTop: '4px' }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ padding: '0.4rem 0.9rem', fontSize: '0.82rem', opacity: votingStatus.enabled ? 1 : 0.6 }}
-                        disabled={!votingStatus.enabled}
-                        title={
-                          votingStatus.enabled
-                            ? 'Vote with verified mobile number'
-                            : 'Voting is disabled until mobile OTP verification is configured'
-                        }
-                      >
-                        <i className="fas fa-thumbs-up" /> Support ({item.vote_count})
-                      </button>
-                      <Link
-                        to={`/track?id=${encodeURIComponent(item.complaint_id)}`}
-                        style={{ color: '#7DFF6A', fontSize: '0.84rem' }}
-                      >
-                        Track Status →
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

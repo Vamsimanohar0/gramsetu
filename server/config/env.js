@@ -31,6 +31,6 @@ module.exports = {
   voterHmacSecret:
     process.env.VOTER_HMAC_SECRET ||
     (nodeEnv === 'production' ? '' : 'gramsetu-dev-only-voter-hmac-secret'),
-  votingVerificationMode: (process.env.VOTING_VERIFICATION_MODE || 'disabled').trim().toLowerCase(),
+  voterCookieName: process.env.VOTER_COOKIE_NAME || 'gramsetu_voter',
 };
 

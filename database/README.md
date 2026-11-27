@@ -22,6 +22,10 @@ If your `vgmp` database already exists in MySQL/MariaDB:
   ```powershell
   mysql -u root -p vgmp < database/migrations/003_rate_limits_table.sql
   ```
+- Add the voting, feedback, status-history, and optional geolocation columns/tables (non-destructive & idempotent):
+  ```powershell
+  mysql -u root -p vgmp < database/migrations/004_release_features.sql
+  ```
 - Run the read-only verification script:
   ```powershell
   mysql -u root -p vgmp < database/migrations/001_verify_integrity.sql

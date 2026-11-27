@@ -11,6 +11,81 @@ const {
 const { signCitizenEvidenceToken } = require('../utils/evidenceToken');
 const { toApproximateCoordinates } = require('../utils/locationUtils');
 
+let warnedMissingOptionalTable = false;
+
+function isMissingOptionalTable(err) {
+  return Boolean(err && (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146));
+}
+
+function logOptionalTableWarning(err) {
+  if (!warnedMissingOptionalTable && process.env.NODE_ENV !== 'test') {
+    warnedMissingOptionalTable = true;
+    console.warn(
+      `[GramSetu Schema Notice] Optional table missing (${err.message}). Apply database/migrations/004_release_features.sql for full voting/history/feedback features.`
+    );
+  }
+}
+
+async function safeGetVoteCountsMap(complaintPks = []) {
+  const uniqueIds = [...new Set(complaintPks.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  const map = new Map();
+  if (uniqueIds.length === 0) {
+    return map;
+  }
+
+  const placeholders = uniqueIds.map(() => '?').join(',');
+  try {
+    const [rows] = await pool.execute(
+      `SELECT complaint_pk, COUNT(*) AS vote_count
+       FROM complaint_votes
+       WHERE complaint_pk IN (${placeholders})
+       GROUP BY complaint_pk`,
+      uniqueIds
+    );
+    for (const row of Array.isArray(rows) ? rows : []) {
+      map.set(Number(row.complaint_pk), Number(row.vote_count || 0));
+    }
+  } catch (err) {
+    if (isMissingOptionalTable(err)) {
+      logOptionalTableWarning(err);
+      return map;
+    }
+    throw err;
+  }
+  return map;
+}
+
+async function safeGetUserVotedSet(complaintPks = [], voterKeyHmac = '') {
+  const votedSet = new Set();
+  if (!voterKeyHmac) {
+    return votedSet;
+  }
+  const uniqueIds = [...new Set(complaintPks.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  if (uniqueIds.length === 0) {
+    return votedSet;
+  }
+
+  const placeholders = uniqueIds.map(() => '?').join(',');
+  try {
+    const [rows] = await pool.execute(
+      `SELECT complaint_pk
+       FROM complaint_votes
+       WHERE voter_key_hmac = ? AND complaint_pk IN (${placeholders})`,
+      [voterKeyHmac, ...uniqueIds]
+    );
+    for (const row of Array.isArray(rows) ? rows : []) {
+      votedSet.add(Number(row.complaint_pk));
+    }
+  } catch (err) {
+    if (isMissingOptionalTable(err)) {
+      logOptionalTableWarning(err);
+      return votedSet;
+    }
+    throw err;
+  }
+  return votedSet;
+}
+
 function buildAdminImageUrls(complaintPk, rawImagePath) {
   return parseImagePaths(rawImagePath).map((imgPath) => {
     const filename = path.basename(imgPath);
@@ -32,12 +107,14 @@ function toNullableNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
-function formatAdminComplaintRow(row) {
+function formatAdminComplaintRow(row, voteCountMap = null) {
   if (!row) return null;
   const latitude = toNullableNumber(row.latitude);
   const longitude = toNullableNumber(row.longitude);
   const approxLatitude = toNullableNumber(row.approx_latitude);
   const approxLongitude = toNullableNumber(row.approx_longitude);
+  const resolvedVoteCount =
+    voteCountMap && row.id ? voteCountMap.get(Number(row.id)) : undefined;
 
   return {
     ...row,
@@ -49,14 +126,18 @@ function formatAdminComplaintRow(row) {
     approx_longitude: approxLongitude,
     location_source: row.location_source || null,
     has_location: latitude !== null && longitude !== null,
-    vote_count: Number(row.vote_count || 0),
+    vote_count: Number(resolvedVoteCount ?? row.vote_count ?? 0),
   };
 }
 
-function formatPublicComplaintRow(row) {
+function formatPublicComplaintRow(row, { voteCountMap = null, userVotedSet = null } = {}) {
   if (!row) return null;
   const approxLatitude = toNullableNumber(row.approx_latitude);
   const approxLongitude = toNullableNumber(row.approx_longitude);
+  const resolvedVoteCount =
+    voteCountMap && row.id ? voteCountMap.get(Number(row.id)) : undefined;
+  const hasUserVoted =
+    userVotedSet && row.id ? userVotedSet.has(Number(row.id)) : Boolean(row.user_voted);
 
   return {
     complaint_id: row.complaint_id,
@@ -71,7 +152,8 @@ function formatPublicComplaintRow(row) {
     images: buildCitizenImageUrls(row.complaint_id, row.image_path),
     audio_path: null,
     status: row.status,
-    vote_count: Number(row.vote_count || 0),
+    vote_count: Number(resolvedVoteCount ?? row.vote_count ?? 0),
+    user_voted: hasUserVoted,
     has_location: approxLatitude !== null && approxLongitude !== null,
     approx_latitude: approxLatitude,
     approx_longitude: approxLongitude,
@@ -174,17 +256,22 @@ async function createComplaint(data, uploadedFiles = []) {
     );
 
     if (insertResult && insertResult.insertId) {
-      await connection.execute(
-        `INSERT INTO complaint_status_history (
-          complaint_pk,
-          from_status,
-          to_status,
-          actor_type,
-          actor_id,
-          note
-        ) VALUES (?, NULL, 'Submitted', 'system', NULL, ?)`,
-        [insertResult.insertId, 'Complaint registered by citizen']
-      );
+      try {
+        await connection.execute(
+          `INSERT INTO complaint_status_history (
+            complaint_pk,
+            from_status,
+            to_status,
+            actor_type,
+            actor_id,
+            note
+          ) VALUES (?, NULL, 'Submitted', 'system', NULL, ?)`,
+          [insertResult.insertId, 'Complaint registered by citizen']
+        );
+      } catch (histErr) {
+        if (!isMissingOptionalTable(histErr)) throw histErr;
+        logOptionalTableWarning(histErr);
+      }
     }
 
     await connection.commit();
@@ -205,13 +292,23 @@ async function createComplaint(data, uploadedFiles = []) {
 }
 
 async function getComplaintHistoryAndFeedback(connectionOrPool, complaintPk, currentStatus, createdAt) {
-  const [historyRows] = await connectionOrPool.execute(
-    `SELECT id, from_status, to_status, actor_type, note, created_at
-     FROM complaint_status_history
-     WHERE complaint_pk = ?
-     ORDER BY created_at ASC, id ASC`,
-    [complaintPk]
-  );
+  let historyRows = [];
+  try {
+    const [rows] = await connectionOrPool.execute(
+      `SELECT id, from_status, to_status, actor_type, note, created_at
+       FROM complaint_status_history
+       WHERE complaint_pk = ?
+       ORDER BY created_at ASC, id ASC`,
+      [complaintPk]
+    );
+    historyRows = rows;
+  } catch (err) {
+    if (isMissingOptionalTable(err)) {
+      logOptionalTableWarning(err);
+    } else {
+      throw err;
+    }
+  }
 
   const updates =
     Array.isArray(historyRows) && historyRows.length > 0
@@ -231,13 +328,23 @@ async function getComplaintHistoryAndFeedback(connectionOrPool, complaintPk, cur
           },
         ];
 
-  const [feedbackRows] = await connectionOrPool.execute(
-    `SELECT id, rating, comment, resolution_confirmed, reopen_requested, submitted_at, updated_at
-     FROM complaint_feedback
-     WHERE complaint_pk = ?
-     LIMIT 1`,
-    [complaintPk]
-  );
+  let feedbackRows = [];
+  try {
+    const [rows] = await connectionOrPool.execute(
+      `SELECT id, rating, comment, resolution_confirmed, reopen_requested, submitted_at, updated_at
+       FROM complaint_feedback
+       WHERE complaint_pk = ?
+       LIMIT 1`,
+      [complaintPk]
+    );
+    feedbackRows = rows;
+  } catch (err) {
+    if (isMissingOptionalTable(err)) {
+      logOptionalTableWarning(err);
+    } else {
+      throw err;
+    }
+  }
 
   const feedback =
     Array.isArray(feedbackRows) && feedbackRows.length > 0
@@ -254,17 +361,11 @@ async function getComplaintHistoryAndFeedback(connectionOrPool, complaintPk, cur
   return { updates, feedback };
 }
 
-async function trackComplaint(complaintId, mobile) {
+async function trackComplaint(complaintId, mobile, { voterKeyHmac = '' } = {}) {
   const [rows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
-            COALESCE(cv.vote_count, 0) AS vote_count
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     LEFT JOIN (
-       SELECT complaint_pk, COUNT(*) AS vote_count
-       FROM complaint_votes
-       GROUP BY complaint_pk
-     ) cv ON cv.complaint_pk = c.id
      WHERE c.complaint_id = ? AND c.mobile = ?
      LIMIT 1`,
     [complaintId, mobile]
@@ -275,7 +376,9 @@ async function trackComplaint(complaintId, mobile) {
   }
 
   const row = rows[0];
-  const complaint = formatPublicComplaintRow(row);
+  const voteCountMap = row.id ? await safeGetVoteCountsMap([row.id]) : new Map();
+  const userVotedSet = row.id ? await safeGetUserVotedSet([row.id], voterKeyHmac) : new Set();
+  const complaint = formatPublicComplaintRow(row, { voteCountMap, userVotedSet });
   const { updates, feedback } = await getComplaintHistoryAndFeedback(
     pool,
     row.id,
@@ -500,26 +603,22 @@ async function getDashboardData(panchayathId) {
   }
 
   const [recentRows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
-            COALESCE(cv.vote_count, 0) AS vote_count
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     LEFT JOIN (
-       SELECT complaint_pk, COUNT(*) AS vote_count
-       FROM complaint_votes
-       GROUP BY complaint_pk
-     ) cv ON cv.complaint_pk = c.id
      WHERE ${joinedScope.clause}
      ORDER BY c.created_at DESC
      LIMIT 10`,
     joinedScope.params
   );
 
+  const voteCountMap = await safeGetVoteCountsMap((recentRows || []).map((r) => r.id));
+
   return {
     villages,
     stats,
     urgentCount: (stats.Submitted || 0) + (stats.Verified || 0),
-    recentComplaints: recentRows.map(formatAdminComplaintRow),
+    recentComplaints: recentRows.map((row) => formatAdminComplaintRow(row, voteCountMap)),
   };
 }
 
@@ -550,21 +649,16 @@ async function getAdminComplaints(panchayathId, { status = '', search = '', vill
   }
 
   const [rows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
-            COALESCE(cv.vote_count, 0) AS vote_count
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     LEFT JOIN (
-       SELECT complaint_pk, COUNT(*) AS vote_count
-       FROM complaint_votes
-       GROUP BY complaint_pk
-     ) cv ON cv.complaint_pk = c.id
      WHERE ${conditions.join(' AND ')}
      ORDER BY c.created_at DESC`,
     params
   );
 
-  return rows.map(formatAdminComplaintRow);
+  const voteCountMap = await safeGetVoteCountsMap((rows || []).map((r) => r.id));
+  return rows.map((row) => formatAdminComplaintRow(row, voteCountMap));
 }
 
 async function getAdminComplaintById(panchayathId, id, { includeDetails = false } = {}) {
@@ -578,15 +672,9 @@ async function getAdminComplaintById(panchayathId, id, { includeDetails = false 
   const joinedScope = buildPanchayathScopeClause(panchayathId, villageIds, 'c');
 
   const [rows] = await pool.execute(
-    `SELECT c.*, COALESCE(v.name, c.village) AS village_name,
-            COALESCE(cv.vote_count, 0) AS vote_count
+    `SELECT c.*, COALESCE(v.name, c.village) AS village_name
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     LEFT JOIN (
-       SELECT complaint_pk, COUNT(*) AS vote_count
-       FROM complaint_votes
-       GROUP BY complaint_pk
-     ) cv ON cv.complaint_pk = c.id
      WHERE c.id = ? AND ${joinedScope.clause}
      LIMIT 1`,
     [numericId, ...joinedScope.params]
@@ -596,7 +684,8 @@ async function getAdminComplaintById(panchayathId, id, { includeDetails = false 
     return null;
   }
 
-  const formatted = formatAdminComplaintRow(rows[0]);
+  const voteCountMap = await safeGetVoteCountsMap([rows[0].id]);
+  const formatted = formatAdminComplaintRow(rows[0], voteCountMap);
   if (!includeDetails) {
     return formatted;
   }
@@ -632,18 +721,23 @@ async function updateAdminComplaintStatus(panchayathId, id, status, note = '') {
   try {
     await connection.beginTransaction();
     await connection.execute('UPDATE complaints SET status = ? WHERE id = ?', [status, existing.id]);
-    await connection.execute(
-      `INSERT INTO complaint_status_history (
-        complaint_pk, from_status, to_status, actor_type, actor_id, note
-      ) VALUES (?, ?, ?, 'admin', ?, ?)`,
-      [
-        existing.id,
-        existing.status || null,
-        status,
-        panchayathId,
-        note || `Status updated by Panchayat Admin from ${existing.status} to ${status}`,
-      ]
-    );
+    try {
+      await connection.execute(
+        `INSERT INTO complaint_status_history (
+          complaint_pk, from_status, to_status, actor_type, actor_id, note
+        ) VALUES (?, ?, ?, 'admin', ?, ?)`,
+        [
+          existing.id,
+          existing.status || null,
+          status,
+          panchayathId,
+          note || `Status updated by Panchayat Admin from ${existing.status} to ${status}`,
+        ]
+      );
+    } catch (histErr) {
+      if (!isMissingOptionalTable(histErr)) throw histErr;
+      logOptionalTableWarning(histErr);
+    }
     await connection.commit();
   } catch (err) {
     await connection.rollback();
@@ -655,7 +749,7 @@ async function updateAdminComplaintStatus(panchayathId, id, status, note = '') {
   return getAdminComplaintById(panchayathId, existing.id, { includeDetails: true });
 }
 
-async function getPublicMapComplaints({ villageId = '', category = '', status = '' } = {}) {
+async function getPublicMapComplaints({ villageId = '', category = '', status = '', voterKeyHmac = '' } = {}) {
   const conditions = ['1 = 1'];
   const params = [];
 
@@ -678,20 +772,19 @@ async function getPublicMapComplaints({ villageId = '', category = '', status = 
   }
 
   const [rows] = await pool.execute(
-    `SELECT c.complaint_id, c.village_id, COALESCE(v.name, c.village) AS village_name,
+    `SELECT c.id, c.complaint_id, c.village_id, COALESCE(v.name, c.village) AS village_name,
             c.category, c.title, c.status, c.approx_latitude, c.approx_longitude,
-            c.created_at, COALESCE(cv.vote_count, 0) AS vote_count
+            c.created_at
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     LEFT JOIN (
-       SELECT complaint_pk, COUNT(*) AS vote_count
-       FROM complaint_votes
-       GROUP BY complaint_pk
-     ) cv ON cv.complaint_pk = c.id
      WHERE ${conditions.join(' AND ')}
      ORDER BY c.created_at DESC`,
     params
   );
+
+  const complaintPks = (rows || []).map((r) => r.id).filter(Boolean);
+  const voteCountMap = await safeGetVoteCountsMap(complaintPks);
+  const userVotedSet = await safeGetUserVotedSet(complaintPks, voterKeyHmac);
 
   const complaints = [];
   const markers = [];
@@ -700,6 +793,7 @@ async function getPublicMapComplaints({ villageId = '', category = '', status = 
     const approxLat = toNullableNumber(row.approx_latitude);
     const approxLng = toNullableNumber(row.approx_longitude);
     const hasLocation = approxLat !== null && approxLng !== null;
+    const resolvedVotes = row.id ? voteCountMap.get(Number(row.id)) : undefined;
 
     const publicItem = {
       complaint_id: row.complaint_id,
@@ -708,7 +802,8 @@ async function getPublicMapComplaints({ villageId = '', category = '', status = 
       category: row.category || 'N/A',
       title: row.title || '',
       status: row.status,
-      vote_count: Number(row.vote_count || 0),
+      vote_count: Number(resolvedVotes ?? row.vote_count ?? 0),
+      user_voted: row.id ? userVotedSet.has(Number(row.id)) : false,
       has_location: hasLocation,
       approx_latitude: approxLat,
       approx_longitude: approxLng,
@@ -761,21 +856,16 @@ async function getAdminMapComplaints(panchayathId, { villageId = '', category = 
   const [rows] = await pool.execute(
     `SELECT c.id, c.complaint_id, c.name, c.village_id, COALESCE(v.name, c.village) AS village_name,
             c.ward_no, c.category, c.title, c.status, c.latitude, c.longitude,
-            c.approx_latitude, c.approx_longitude, c.location_source, c.created_at,
-            COALESCE(cv.vote_count, 0) AS vote_count
+            c.approx_latitude, c.approx_longitude, c.location_source, c.created_at
      FROM complaints c
      LEFT JOIN villages v ON c.village_id = v.id
-     LEFT JOIN (
-       SELECT complaint_pk, COUNT(*) AS vote_count
-       FROM complaint_votes
-       GROUP BY complaint_pk
-     ) cv ON cv.complaint_pk = c.id
      WHERE ${conditions.join(' AND ')}
      ORDER BY c.created_at DESC`,
     params
   );
 
-  const complaints = rows.map(formatAdminComplaintRow);
+  const voteCountMap = await safeGetVoteCountsMap((rows || []).map((r) => r.id));
+  const complaints = rows.map((row) => formatAdminComplaintRow(row, voteCountMap));
   const markers = complaints.filter((item) => item.latitude !== null && item.longitude !== null);
 
   return {

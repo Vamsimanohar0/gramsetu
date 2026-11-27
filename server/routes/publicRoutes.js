@@ -18,7 +18,7 @@ const submitComplaintLimiter = createSharedRateLimiter({
 const trackComplaintLimiter = createSharedRateLimiter({
   prefix: 'track:',
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 60,
   message: 'Too many tracking requests from this IP. Please try again shortly.',
 });
 
@@ -67,12 +67,6 @@ router.post(
 router.post('/complaints/track', trackComplaintLimiter, publicController.trackComplaint);
 router.post('/complaints/feedback', feedbackLimiter, publicController.submitFeedback);
 router.get('/complaints/map', trackComplaintLimiter, publicController.listPublicMapComplaints);
-router.get('/votes/status', publicController.getVotingStatus);
-router.post(
-  '/complaints/:complaintId/votes/challenge',
-  voteIpLimiter,
-  publicController.startVoteVerification
-);
 router.post('/complaints/:complaintId/votes', voteIpLimiter, publicController.castVote);
 router.delete('/complaints/:complaintId/votes', voteIpLimiter, publicController.withdrawVote);
 router.post(

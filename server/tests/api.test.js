@@ -19,8 +19,7 @@ const {
   validateVoteAction,
 } = require('../validators/complaintValidator');
 const { parseCoordinatePair, toApproximateCoordinates } = require('../utils/locationUtils');
-const { normalizeMobileNumber, hashVoterMobile } = require('../utils/voterHash');
-const { setVerificationProviderForTests } = require('../services/verificationService');
+const { normalizeMobileNumber, hashVoterKey } = require('../utils/voterHash');
 const {
   parseImagePaths,
   generateComplaintId,
@@ -940,121 +939,176 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
     assert.equal(dupReopen.status, 409);
   });
 
-  it('keeps live voting disabled when no verification provider is configured, and enforces HMAC uniqueness + withdrawal + status immutability with test adapter', async () => {
-    try {
-      setVerificationProviderForTests(null);
+  it('supports zero-OTP signed voter cookies, duplicate prevention, withdrawal ownership, status immutability, and missing-table resilience', async () => {
+    // Keyed voter HMAC hashing
+    assert.equal(normalizeMobileNumber('+91 98765-43210'), '9876543210');
+    assert.equal(hashVoterKey('voter-abc-123'), hashVoterKey('voter-abc-123'));
+    assert.notEqual(hashVoterKey('voter-abc-123'), 'voter-abc-123');
+    assert.equal(validateVoteAction({ complaint_id: 'GS-2026-10001' }).valid, true);
+    assert.equal(validateVoteAction({ complaint_id: 'bad id!' }).valid, false);
 
-      // Default unconfigured state reports disabled cleanly and blocks fake voting
-      const statusRes = await invokeApp(app, { method: 'GET', url: '/api/votes/status' });
-      assert.equal(statusRes.status, 200);
-      assert.equal(statusRes.body.voting.enabled, false);
+    // Resilience: missing optional tables (ER_NO_SUCH_TABLE) must NOT break complaint tracking
+    pool.execute = async (sql) => {
+      if (sql.includes('WHERE c.complaint_id = ? AND c.mobile = ?')) {
+        return [[{
+          id: 77,
+          complaint_id: 'GS-2026-77777',
+          name: 'Lakshmi Devi',
+          mobile: '9876543210',
+          village_name: 'Kondapalli',
+          category: 'Water Supply',
+          title: 'Low pressure',
+          description: 'Water stops after 7am',
+          image_path: null,
+          status: 'Verified',
+          created_at: '2026-06-25T10:02:59.000Z',
+        }]];
+      }
+      if (
+        sql.includes('FROM complaint_votes') ||
+        sql.includes('FROM complaint_status_history') ||
+        sql.includes('FROM complaint_feedback')
+      ) {
+        const missingErr = new Error("Table 'vgmp.complaint_votes' doesn't exist");
+        missingErr.code = 'ER_NO_SUCH_TABLE';
+        missingErr.errno = 1146;
+        throw missingErr;
+      }
+      return [[]];
+    };
 
-      const unconfiguredVote = await invokeApp(app, {
-        method: 'POST',
-        url: '/api/complaints/GS-2026-10001/votes',
-        body: { mobile: '9876543210', verification_token: 'fake-token' },
-      });
-      assert.equal(unconfiguredVote.status, 503);
+    const resilientTrack = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/track',
+      body: { complaint_id: 'GS-2026-77777', mobile: '9876543210' },
+    });
+    assert.equal(resilientTrack.status, 200);
+    assert.equal(resilientTrack.body.complaint.vote_count, 0);
+    assert.equal(resilientTrack.body.complaint.user_voted, false);
+    assert.equal(resilientTrack.body.updates.length, 1);
+    assert.equal(resilientTrack.body.feedback, null);
 
-      // Verify normalization + keyed HMAC behavior
-      assert.equal(normalizeMobileNumber('+91 98765-43210'), '9876543210');
-      assert.equal(hashVoterMobile('+919876543210'), hashVoterMobile('09876543210'));
-      assert.notEqual(hashVoterMobile('9876543210'), '9876543210');
+    // Zero-OTP voting with signed HttpOnly cookie
+    const voteSet = new Set();
+    let storedStatus = 'Submitted';
 
-      assert.equal(validateVoteAction({ complaint_id: 'GS-2026-10001', mobile: '9876543210' }, { requireToken: true }).valid, false);
-
-      // Inject test-only verification adapter to test duplicate vote prevention & withdrawal
-      setVerificationProviderForTests({
-        methodName: 'test_otp',
-        startVerification: async ({ complaintId }) => ({ challengeId: 'chk-1', complaintId }),
-        verifyAction: async ({ mobile, verificationToken }) => ({
-          verified: verificationToken === 'valid-otp-proof',
-          normalizedMobile: normalizeMobileNumber(mobile),
-          method: 'test_otp',
-        }),
-      });
-
-      const voteSet = new Set();
-      let storedStatus = 'Submitted';
-
-      pool.getConnection = async () => ({
-        beginTransaction: async () => {},
-        execute: async (sql, params) => {
-          if (sql.includes('SELECT id, complaint_id, status FROM complaints')) {
-            return [[{ id: 99, complaint_id: params[0], status: storedStatus }]];
+    pool.getConnection = async () => ({
+      beginTransaction: async () => {},
+      execute: async (sql, params) => {
+        if (sql.includes('SELECT id, complaint_id, status FROM complaints')) {
+          return [[{ id: 99, complaint_id: params[0], status: storedStatus }]];
+        }
+        if (sql.startsWith('INSERT INTO complaint_votes')) {
+          const hmac = params[1];
+          if (voteSet.has(hmac)) {
+            const dup = new Error('Duplicate entry');
+            dup.code = 'ER_DUP_ENTRY';
+            throw dup;
           }
-          if (sql.startsWith('INSERT INTO complaint_votes')) {
-            const hmac = params[1];
-            if (voteSet.has(hmac)) {
-              const dup = new Error('Duplicate entry');
-              dup.code = 'ER_DUP_ENTRY';
-              throw dup;
-            }
-            voteSet.add(hmac);
-            return [{ insertId: 1 }];
-          }
-          if (sql.startsWith('DELETE FROM complaint_votes')) {
-            const hmac = params[1];
-            const existed = voteSet.delete(hmac);
-            return [{ affectedRows: existed ? 1 : 0 }];
-          }
-          if (sql.includes('SELECT COUNT(*) AS count FROM complaint_votes')) {
-            return [[{ count: voteSet.size }]];
-          }
-          return [{ affectedRows: 1 }];
-        },
-        commit: async () => {},
-        rollback: async () => {},
-        release: () => {},
-      });
+          voteSet.add(hmac);
+          return [{ insertId: 1 }];
+        }
+        if (sql.startsWith('DELETE FROM complaint_votes')) {
+          const hmac = params[1];
+          const existed = voteSet.delete(hmac);
+          return [{ affectedRows: existed ? 1 : 0 }];
+        }
+        if (sql.includes('SELECT COUNT(*) AS count FROM complaint_votes')) {
+          return [[{ count: voteSet.size }]];
+        }
+        return [{ affectedRows: 1 }];
+      },
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+    });
 
-      // Invalid verification proof denied (403)
-      const badProof = await invokeApp(app, {
-        method: 'POST',
-        url: '/api/complaints/GS-2026-10001/votes',
-        body: { mobile: '9876543210', verification_token: 'wrong' },
-      });
-      assert.equal(badProof.status, 403);
+    // Cast vote without OTP -> issues HttpOnly voter cookie, increments count, leaves status intact
+    const voteOk = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/GS-2026-10001/votes',
+    });
+    assert.equal(voteOk.status, 201);
+    assert.equal(voteOk.body.vote_count, 1);
+    assert.equal(voteOk.body.user_voted, true);
+    assert.equal(voteOk.body.status, 'Submitted');
+    assert.equal(storedStatus, 'Submitted');
+    const voterSetCookie = String(voteOk.headers['set-cookie']);
+    assert.match(voterSetCookie, /gramsetu_voter=/i);
+    assert.match(voterSetCookie, /HttpOnly/i);
+    const voterCookiePair = extractCookiePair(voteOk.headers['set-cookie']);
 
-      // First valid verified vote succeeds; complaint status stays unchanged
-      const voteOk = await invokeApp(app, {
-        method: 'POST',
-        url: '/api/complaints/GS-2026-10001/votes',
-        body: { mobile: '+91 9876543210', verification_token: 'valid-otp-proof' },
-      });
-      assert.equal(voteOk.status, 201);
-      assert.equal(voteOk.body.vote_count, 1);
-      assert.equal(voteOk.body.status, 'Submitted');
-      assert.equal(storedStatus, 'Submitted');
+    // Duplicate vote from same browser cookie -> 409 Conflict
+    const dupVote = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/GS-2026-10001/votes',
+      headers: { Cookie: voterCookiePair },
+    });
+    assert.equal(dupVote.status, 409);
 
-      // Same mobile normalized differently ('09876543210') hits HMAC unique constraint -> 409
-      const dupVote = await invokeApp(app, {
-        method: 'POST',
-        url: '/api/complaints/GS-2026-10001/votes',
-        body: { mobile: '09876543210', verification_token: 'valid-otp-proof' },
-      });
-      assert.equal(dupVote.status, 409);
+    // Withdrawal without valid cookie -> 403 Unauthorized
+    const unauthWithdraw = await invokeApp(app, {
+      method: 'DELETE',
+      url: '/api/complaints/GS-2026-10001/votes',
+    });
+    assert.equal(unauthWithdraw.status, 403);
 
-      // Withdraw vote -> count drops to 0
-      const withdrawOk = await invokeApp(app, {
-        method: 'DELETE',
-        url: '/api/complaints/GS-2026-10001/votes',
-        body: { mobile: '9876543210', verification_token: 'valid-otp-proof' },
-      });
-      assert.equal(withdrawOk.status, 200);
-      assert.equal(withdrawOk.body.vote_count, 0);
-      assert.equal(withdrawOk.body.voted, false);
+    // Withdraw with tampered cookie -> 403 Unauthorized
+    const tamperedWithdraw = await invokeApp(app, {
+      method: 'DELETE',
+      url: '/api/complaints/GS-2026-10001/votes',
+      headers: { Cookie: `${env.voterCookieName}=tampered.value` },
+    });
+    assert.equal(tamperedWithdraw.status, 403);
 
-      // Resolved complaints cannot receive new votes
-      storedStatus = 'Resolved';
-      const voteResolved = await invokeApp(app, {
-        method: 'POST',
-        url: '/api/complaints/GS-2026-10001/votes',
-        body: { mobile: '9876543210', verification_token: 'valid-otp-proof' },
-      });
-      assert.equal(voteResolved.status, 400);
-    } finally {
-      setVerificationProviderForTests(null);
-    }
+    // Track reflects user_voted=true for same voter cookie
+    pool.execute = async (sql) => {
+      if (sql.includes('WHERE c.complaint_id = ? AND c.mobile = ?')) {
+        return [[{
+          id: 99,
+          complaint_id: 'GS-2026-10001',
+          name: 'Lakshmi',
+          mobile: '9876543210',
+          village_name: 'Kondapalli',
+          status: 'Submitted',
+          created_at: '2026-06-25T10:02:59.000Z',
+        }]];
+      }
+      if (sql.includes('COUNT(*) AS vote_count')) {
+        return [[{ complaint_pk: 99, vote_count: voteSet.size }]];
+      }
+      if (sql.includes('WHERE voter_key_hmac = ?')) {
+        return [[{ complaint_pk: 99 }]];
+      }
+      return [[]];
+    };
+    const trackedWithVote = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/track',
+      headers: { Cookie: voterCookiePair },
+      body: { complaint_id: 'GS-2026-10001', mobile: '9876543210' },
+    });
+    assert.equal(trackedWithVote.status, 200);
+    assert.equal(trackedWithVote.body.complaint.vote_count, 1);
+    assert.equal(trackedWithVote.body.complaint.user_voted, true);
+
+    // Valid withdrawal -> 200 and vote_count drops to 0
+    const withdrawOk = await invokeApp(app, {
+      method: 'DELETE',
+      url: '/api/complaints/GS-2026-10001/votes',
+      headers: { Cookie: voterCookiePair },
+    });
+    assert.equal(withdrawOk.status, 200);
+    assert.equal(withdrawOk.body.vote_count, 0);
+    assert.equal(withdrawOk.body.user_voted, false);
+
+    // Closed/Rejected/Resolved complaints cannot receive new votes
+    storedStatus = 'Rejected';
+    const voteRejected = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/GS-2026-10001/votes',
+      headers: { Cookie: voterCookiePair },
+    });
+    assert.equal(voteRejected.status, 400);
   });
 });

@@ -12,7 +12,7 @@ export function resolveUploadUrl(relativePath) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const { method = 'GET', body = null, headers = {}, isFormData = false } = options;
+  const { method = 'GET', body = null, headers = {}, isFormData = false, signal } = options;
 
   const requestHeaders = { ...headers };
   if (!isFormData && body !== null && !requestHeaders['Content-Type']) {
@@ -23,6 +23,7 @@ export async function apiRequest(path, options = {}) {
     method,
     headers: requestHeaders,
     credentials: 'include',
+    signal,
     body: body === null ? undefined : isFormData ? body : JSON.stringify(body),
   });
 

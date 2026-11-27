@@ -41,6 +41,17 @@ function errorHandler(err, _req, res, _next) {
     });
   }
 
+  if (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146) {
+    if (env.nodeEnv !== 'test') {
+      console.error('[GramSetu Schema Error]', err.code, err.message);
+    }
+    return res.status(503).json({
+      status: 'error',
+      message:
+        'Database schema update required. Please ensure all SQL migrations in database/migrations/ have been applied.',
+    });
+  }
+
   const statusCode = err.statusCode || 500;
   const message =
     statusCode >= 500 && env.nodeEnv === 'production'

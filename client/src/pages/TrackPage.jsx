@@ -1,46 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import { apiRequest, resolveUploadUrl } from '../services/api';
+import { getStatusDisplayMeta, isVoteEligibleStatus } from '../utils/statusProgress';
 import '../styles/track.css';
 import '../styles/features.css';
 
-function getProgressPercentage(status) {
-  switch ((status || '').toLowerCase()) {
-    case 'submitted':
-      return 25;
-    case 'verified':
-    case 'assigned':
-      return 50;
-    case 'in progress':
-    case 'in-progress':
-      return 75;
-    case 'resolved':
-    case 'completed':
-      return 100;
-    default:
-      return 25;
-  }
-}
+const AUTO_REFRESH_INTERVAL_MS = 30000;
 
-function getStatusBadgeMeta(status) {
-  switch ((status || '').toLowerCase()) {
-    case 'submitted':
-      return { icon: 'fa-clock', color: '#f9b84a' };
-    case 'verified':
-    case 'assigned':
-      return { icon: 'fa-check-circle', color: '#4CAF50' };
-    case 'in progress':
-    case 'in-progress':
-      return { icon: 'fa-spinner fa-pulse', color: '#7DFF6A' };
-    case 'resolved':
-    case 'completed':
-      return { icon: 'fa-check-circle', color: '#4CAF50' };
-    case 'rejected':
-      return { icon: 'fa-times-circle', color: '#ff6b6b' };
-    default:
-      return { icon: 'fa-circle', color: '#7DFF6A' };
+function dedupeStatusUpdates(list = []) {
+  const seen = new Set();
+  const result = [];
+  for (const item of list) {
+    const key =
+      item?.id !== undefined && item?.id !== null
+        ? `id:${item.id}`
+        : `txt:${item?.status || ''}|${item?.updated_at || ''}|${item?.remarks || ''}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(item);
+    }
   }
+  return result;
 }
 
 export default function TrackPage() {
@@ -50,6 +31,12 @@ export default function TrackPage() {
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [tracked, setTracked] = useState(null);
+  const [activeTarget, setActiveTarget] = useState(null);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [refreshError, setRefreshError] = useState('');
+  const [pollingPaused, setPollingPaused] = useState(false);
 
   const [searchMobile, setSearchMobile] = useState('');
   const [lookupResults, setLookupResults] = useState(null);
@@ -62,19 +49,123 @@ export default function TrackPage() {
   const [feedbackEditing, setFeedbackEditing] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackNotice, setFeedbackNotice] = useState({ type: '', text: '' });
-  const [votingStatus, setVotingStatus] = useState({ enabled: false, message: '' });
+
+  const [voteSubmitting, setVoteSubmitting] = useState(false);
+  const [voteNotice, setVoteNotice] = useState({ type: '', text: '' });
 
   const complaintInputRef = useRef(null);
   const mobileInputRef = useRef(null);
+  const inFlightRef = useRef(false);
+  const abortControllerRef = useRef(null);
+  const feedbackEditingRef = useRef(false);
+  const lastUpdatedAtRef = useRef(null);
+
+  useEffect(() => {
+    feedbackEditingRef.current = feedbackEditing;
+  }, [feedbackEditing]);
 
   useEffect(() => {
     document.title = 'GRAMSETU - Track Complaint';
-    apiRequest('/api/votes/status')
-      .then((res) => {
-        if (res.voting) setVotingStatus(res.voting);
-      })
-      .catch(() => {});
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, []);
+
+  const fetchTrackedComplaint = useCallback(
+    async ({ idTrimmed, mobileTrimmed, silent = false }) => {
+      if (!idTrimmed || !mobileTrimmed) return;
+      if (silent && inFlightRef.current) return;
+
+      if (!silent) {
+        abortControllerRef.current?.abort();
+        setLoading(true);
+        setTracked(null);
+        setNotFound(false);
+        setFeedbackNotice({ type: '', text: '' });
+        setVoteNotice({ type: '', text: '' });
+        setRefreshError('');
+        setPollingPaused(false);
+      } else {
+        setIsRefreshing(true);
+      }
+
+      inFlightRef.current = true;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const data = await apiRequest('/api/complaints/track', {
+          method: 'POST',
+          body: { complaint_id: idTrimmed, mobile: mobileTrimmed },
+          signal: controller.signal,
+        });
+
+        if (data.status === 'success' && data.complaint) {
+          const dedupedData = {
+            ...data,
+            updates: dedupeStatusUpdates(Array.isArray(data.updates) ? data.updates : []),
+          };
+          setTracked(dedupedData);
+          const now = new Date();
+          setLastUpdatedAt(now);
+          lastUpdatedAtRef.current = now;
+          setRefreshError('');
+          setPollingPaused(false);
+          setActiveTarget((prev) =>
+            prev && prev.complaintId === idTrimmed && prev.mobile === mobileTrimmed
+              ? prev
+              : { complaintId: idTrimmed, mobile: mobileTrimmed }
+          );
+
+          if (!silent || !feedbackEditingRef.current) {
+            if (data.feedback) {
+              setRating(data.feedback.rating || 5);
+              setFeedbackText(data.feedback.comment || '');
+              setResolutionConfirmed(Boolean(data.feedback.resolution_confirmed));
+              if (!silent) setFeedbackEditing(false);
+            } else if (!silent) {
+              setRating(5);
+              setFeedbackText('');
+              setResolutionConfirmed(true);
+              setFeedbackEditing(data.complaint.status === 'Resolved');
+            }
+          }
+        } else if (!silent) {
+          setActiveTarget(null);
+          setNotFound(true);
+        }
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+
+        if (!silent) {
+          if (err.status === 404) {
+            setActiveTarget(null);
+            setNotFound(true);
+          } else {
+            alert(`Error fetching complaint: ${err.message}`);
+          }
+        } else {
+          // Preserve existing loaded complaint data on background refresh failures
+          if (err.status === 429) {
+            setPollingPaused(true);
+            setRefreshError('Auto-refresh paused temporarily due to request limit. Click Refresh shortly.');
+          } else {
+            setRefreshError(
+              `Unable to refresh status (${err.message || 'network error'}). Showing last loaded details.`
+            );
+          }
+        }
+      } finally {
+        inFlightRef.current = false;
+        if (!silent) {
+          setLoading(false);
+        } else {
+          setIsRefreshing(false);
+        }
+      }
+    },
+    []
+  );
 
   const handleTrack = async () => {
     const idTrimmed = complaintId.trim();
@@ -85,49 +176,71 @@ export default function TrackPage() {
       return;
     }
 
-    setLoading(true);
-    setTracked(null);
-    setNotFound(false);
-    setFeedbackNotice({ type: '', text: '' });
-
-    try {
-      const data = await apiRequest('/api/complaints/track', {
-        method: 'POST',
-        body: { complaint_id: idTrimmed, mobile: mobileTrimmed },
-      });
-
-      if (data.status === 'success' && data.complaint) {
-        setTracked(data);
-        if (data.feedback) {
-          setRating(data.feedback.rating || 5);
-          setFeedbackText(data.feedback.comment || '');
-          setResolutionConfirmed(Boolean(data.feedback.resolution_confirmed));
-          setFeedbackEditing(false);
-        } else {
-          setRating(5);
-          setFeedbackText('');
-          setResolutionConfirmed(true);
-          setFeedbackEditing(data.complaint.status === 'Resolved');
-        }
-      } else {
-        setNotFound(true);
-      }
-    } catch (err) {
-      if (err.status === 404) {
-        setNotFound(true);
-      } else {
-        alert(`Error fetching complaint: ${err.message}`);
-      }
-    } finally {
-      setLoading(false);
-    }
+    await fetchTrackedComplaint({ idTrimmed, mobileTrimmed, silent: false });
   };
 
+  useEffect(() => {
+    if (!activeTarget || pollingPaused || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    let timerId = null;
+
+    const startPolling = () => {
+      if (timerId) clearInterval(timerId);
+      if (document.visibilityState === 'hidden') return;
+      timerId = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchTrackedComplaint({
+            idTrimmed: activeTarget.complaintId,
+            mobileTrimmed: activeTarget.mobile,
+            silent: true,
+          });
+        }
+      }, AUTO_REFRESH_INTERVAL_MS);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (timerId) {
+          clearInterval(timerId);
+          timerId = null;
+        }
+      } else {
+        const lastTime = lastUpdatedAtRef.current?.getTime() || 0;
+        if (Date.now() - lastTime >= 10000) {
+          fetchTrackedComplaint({
+            idTrimmed: activeTarget.complaintId,
+            mobileTrimmed: activeTarget.mobile,
+            silent: true,
+          });
+        }
+        startPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (timerId) clearInterval(timerId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      abortControllerRef.current?.abort();
+    };
+  }, [activeTarget, pollingPaused, fetchTrackedComplaint]);
+
   const handleClear = () => {
+    abortControllerRef.current?.abort();
+    setActiveTarget(null);
     setComplaintId('');
     setMobile('');
     setTracked(null);
     setNotFound(false);
+    setLastUpdatedAt(null);
+    lastUpdatedAtRef.current = null;
+    setRefreshError('');
+    setPollingPaused(false);
+    setVoteNotice({ type: '', text: '' });
   };
 
   const handleLookupByMobile = async () => {
@@ -202,12 +315,50 @@ export default function TrackPage() {
     }
   };
 
+  const handleVoteToggle = async () => {
+    if (!complaint?.complaint_id || voteSubmitting) return;
+    setVoteSubmitting(true);
+    setVoteNotice({ type: '', text: '' });
+
+    const currentlyVoted = Boolean(complaint.user_voted);
+    try {
+      const res = await apiRequest(
+        `/api/complaints/${encodeURIComponent(complaint.complaint_id)}/votes`,
+        {
+          method: currentlyVoted ? 'DELETE' : 'POST',
+        }
+      );
+
+      setTracked((prev) =>
+        prev
+          ? {
+              ...prev,
+              complaint: {
+                ...prev.complaint,
+                vote_count: res.vote_count,
+                user_voted: res.user_voted,
+              },
+            }
+          : prev
+      );
+      setVoteNotice({
+        type: 'success',
+        text: res.message || (res.user_voted ? 'Support recorded.' : 'Support withdrawn.'),
+      });
+    } catch (err) {
+      setVoteNotice({
+        type: 'error',
+        text: err.message || 'Unable to update vote right now.',
+      });
+    } finally {
+      setVoteSubmitting(false);
+    }
+  };
+
   const complaint = tracked?.complaint || null;
   const updates = tracked?.updates || [];
-  const percentage = complaint ? getProgressPercentage(complaint.status) : 0;
-  const badgeMeta = complaint
-    ? getStatusBadgeMeta(complaint.status)
-    : { icon: 'fa-spinner fa-pulse', color: '#7DFF6A' };
+  const statusMeta = getStatusDisplayMeta(complaint?.status);
+  const canVote = complaint ? isVoteEligibleStatus(complaint.status) : false;
   const evidenceImages = complaint?.images || [];
   const hasAudio =
     complaint?.audio_path && complaint.audio_path !== 'NULL' && complaint.audio_path !== '';
@@ -229,7 +380,7 @@ export default function TrackPage() {
           </div>
           <h1>Track Your Complaint Status</h1>
           <p className="subhead" style={{ marginLeft: 'auto', marginRight: 'auto' }}>
-            Enter your Complaint ID to view real-time progress and updates from your Panchayat.
+            Enter your Complaint ID and mobile number to view current progress and official updates from your Panchayat.
           </p>
         </section>
 
@@ -390,14 +541,39 @@ export default function TrackPage() {
                   />
                   Complaint Details
                 </h3>
-                <span className="status-badge" id="statusBadge">
+                <span className={`status-badge ${statusMeta.barClass}`} id="statusBadge">
                   <i
-                    className={`fas ${badgeMeta.icon}`}
-                    style={{ color: badgeMeta.color, marginRight: '6px' }}
+                    className={`fas ${statusMeta.icon}`}
+                    style={{ color: statusMeta.color, marginRight: '6px' }}
                   />{' '}
-                  <span>{complaint.status}</span>
+                  <span>{statusMeta.label}</span>
                 </span>
               </div>
+
+              <div className="refresh-meta-bar">
+                <span>
+                  <i className={isRefreshing ? 'fas fa-sync fa-spin' : 'fas fa-sync-alt'} style={{ marginRight: '6px', color: '#7DFF6A' }} />
+                  {lastUpdatedAt
+                    ? `Last updated: ${lastUpdatedAt.toLocaleTimeString()} (auto-refreshes every 30s while open)`
+                    : 'Auto-refresh active while tab is open'}
+                </span>
+                <button
+                  type="button"
+                  className="refresh-meta-btn"
+                  disabled={isRefreshing || !activeTarget}
+                  onClick={() =>
+                    activeTarget &&
+                    fetchTrackedComplaint({
+                      idTrimmed: activeTarget.complaintId,
+                      mobileTrimmed: activeTarget.mobile,
+                      silent: true,
+                    })
+                  }
+                >
+                  {isRefreshing ? 'Refreshing...' : 'Refresh Now'}
+                </button>
+              </div>
+              {refreshError && <div className="feedback-notice error">{refreshError}</div>}
 
               <div className="glass mt-1">
                 <h4>
@@ -441,16 +617,17 @@ export default function TrackPage() {
 
               <div className="progress-track">
                 <div
-                  className="progress-fill"
+                  className={`progress-fill ${statusMeta.barClass}`}
                   id="progressFill"
-                  style={{ width: `${percentage}%` }}
+                  style={{ width: `${statusMeta.percentage}%` }}
                 />
               </div>
               <div className="progress-label">
-                <span>Submitted</span>
-                <span id="progressPercentage">{percentage}% Complete</span>
-                <span>Resolved</span>
+                <span>{statusMeta.leftLabel}</span>
+                <span id="progressPercentage">{statusMeta.stageLabel}</span>
+                <span>{statusMeta.rightLabel}</span>
               </div>
+              {statusMeta.note && <p className="terminal-status-note">{statusMeta.note}</p>}
 
               <div style={{ marginTop: '2rem' }}>
                 <h4 style={{ fontWeight: 500, marginBottom: '1.4rem' }}>
@@ -524,22 +701,38 @@ export default function TrackPage() {
                       Community Support Votes
                     </h4>
                     <small style={{ color: '#9ab5a6' }}>
-                      {votingStatus.message ||
-                        'Verified mobile OTP voting is disabled until an SMS verification provider is configured.'}
+                      {canVote
+                        ? 'Citizens can support active complaints (one vote per browser, no account or login needed).'
+                        : 'Voting is closed because this complaint is no longer in an active stage.'}
                     </small>
                   </div>
                   <div className="vote-count-pill">
                     <span>{Number(complaint.vote_count || 0)} Votes</span>
                     <button
                       type="button"
+                      id="trackVoteBtn"
                       className="btn btn-secondary"
-                      style={{ padding: '0.25rem 0.7rem', fontSize: '0.78rem', opacity: votingStatus.enabled ? 1 : 0.6 }}
-                      disabled={!votingStatus.enabled}
+                      style={{
+                        padding: '0.25rem 0.75rem',
+                        fontSize: '0.78rem',
+                        opacity: canVote ? 1 : 0.55,
+                      }}
+                      disabled={!canVote || voteSubmitting}
+                      onClick={handleVoteToggle}
                     >
-                      {votingStatus.enabled ? 'Vote / Withdraw' : 'Verification Required'}
+                      {voteSubmitting
+                        ? 'Saving...'
+                        : complaint.user_voted
+                          ? 'Withdraw Support'
+                          : 'Support Complaint'}
                     </button>
                   </div>
                 </div>
+                {voteNotice.text && (
+                  <div className={`feedback-notice ${voteNotice.type}`} style={{ marginTop: '0.6rem' }}>
+                    {voteNotice.text}
+                  </div>
+                )}
               </div>
 
               <div style={{ marginTop: '2.2rem' }}>
@@ -676,7 +869,7 @@ export default function TrackPage() {
               <i className="fas fa-search" style={{ fontSize: '3rem', color: '#7DFF6A' }} />
               <h3 style={{ color: '#d6e4ff' }}>Complaint Not Found</h3>
               <p className="text-muted" style={{ maxWidth: '300px', margin: '0.4rem auto' }}>
-                Please verify your Complaint ID and try again.
+                Please check your Complaint ID and mobile number and try again.
               </p>
               <button
                 type="button"
@@ -705,19 +898,27 @@ export default function TrackPage() {
           </h3>
           <div className="faq-item">
             <strong>How do I find my Complaint ID?</strong>
-            <p>Your Complaint ID is sent via SMS and email after submission. It starts with &apos;GS-&apos;.</p>
+            <p>
+              Your Complaint ID (starting with &apos;GS-&apos;) is shown on-screen immediately after submitting a complaint. You can also use &quot;Find Your Complaint ID&quot; above with your registered mobile number.
+            </p>
           </div>
           <div className="faq-item">
-            <strong>How often is status updated?</strong>
-            <p>Status is updated in real-time. You may see changes within 2–4 hours of any action.</p>
+            <strong>How are complaint statuses updated?</strong>
+            <p>
+              Panchayat officials update your complaint status as they review and act on it. While this tracking page stays open, it automatically checks for new updates.
+            </p>
           </div>
           <div className="faq-item">
-            <strong>Can I edit my complaint?</strong>
-            <p>Edits are allowed only within 24 hours of submission. Contact support for changes.</p>
+            <strong>Can I edit my complaint or submit feedback?</strong>
+            <p>
+              Submitted complaint details cannot be edited directly. Once a complaint is marked Resolved, you can rate the resolution, leave feedback, or reopen it here if the issue is not fixed.
+            </p>
           </div>
           <div className="faq-item">
-            <strong>How do I contact support?</strong>
-            <p>Call 1800-123-4567 or email support@gramsetu.gov.in (Mon-Sat 10am-5pm).</p>
+            <strong>Need help from your Panchayat?</strong>
+            <p>
+              Please check your status history above or contact your local Gram Panchayat office directly with your Complaint ID.
+            </p>
           </div>
         </section>
 

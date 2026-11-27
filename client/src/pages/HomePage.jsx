@@ -10,8 +10,8 @@ const FAQ_ITEMS = [
     a: (
       <>
         Click <strong>File a Complaint</strong> on the homepage. Fill in the issue details, choose a
-        category, optionally attach a photo or voice note, and pin your location. Submit — and your
-        complaint is instantly registered with a unique tracking ID.
+        category, optionally use English or Telugu speech-to-text, attach photos, or pin the issue
+        location on the map. Submit — and your Complaint ID appears immediately on screen.
       </>
     ),
   },
@@ -19,9 +19,9 @@ const FAQ_ITEMS = [
     q: 'Can I track my complaint?',
     a: (
       <>
-        Yes. Use the <strong>Track Complaint</strong> page and enter your tracking ID. You&apos;ll
-        see the full status timeline — from submission to assignment to resolution — updated in real
-        time by the Panchayat officials.
+        Yes. Open the <strong>Track Complaint</strong> page and enter your Complaint ID and registered
+        mobile number. You&apos;ll see your current stage and official status history recorded by
+        Panchayat officials, and the page refreshes automatically while open.
       </>
     ),
   },
@@ -29,9 +29,8 @@ const FAQ_ITEMS = [
     q: 'Do I need an account to file a complaint?',
     a: (
       <>
-        No account needed to file or track a complaint. Just your mobile number for OTP
-        verification. Creating an optional profile lets you view complaint history and get push
-        notifications.
+        No citizen account or password is needed to file, track, or support a complaint.
+        Simply save your generated Complaint ID and mobile number to check status updates anytime.
       </>
     ),
   },
@@ -39,29 +38,28 @@ const FAQ_ITEMS = [
     q: 'Can I upload photos with my complaint?',
     a: (
       <>
-        Absolutely. You can attach up to <strong>3 photos</strong> per complaint directly from your
-        camera or gallery. Clear images help officials assess the severity faster and speed up
-        resolution.
+        Yes. You can attach up to <strong>6 photos</strong> (JPG, JPEG, or PNG) per complaint from
+        your device. Clear images help Panchayat officials review the issue accurately.
       </>
     ),
   },
   {
-    q: 'Can I submit a voice complaint?',
+    q: 'Can I use voice input for my complaint?',
     a: (
       <>
-        Yes — tap the microphone button on the complaint form and record up to{' '}
-        <strong>60 seconds</strong> of audio. This is especially useful for citizens who find typing
-        difficult or prefer speaking in their local language.
+        Yes — in supported browsers, select <strong>English</strong> or <strong>తెలుగు</strong> next
+        to the microphone button on the complaint form to dictate text directly into the
+        description box. No audio recording is stored, and typing is always available.
       </>
     ),
   },
   {
-    q: 'How long does resolution take?',
+    q: 'How is resolution time handled?',
     a: (
       <>
-        Most complaints are acknowledged within <strong>24 hours</strong> and resolved within{' '}
-        <strong>7 working days</strong> depending on the category and urgency. Critical issues like
-        water contamination or exposed wiring are escalated automatically for faster response.
+        Timelines vary depending on the complaint type and Panchayat review. Once Panchayat officials
+        update your complaint to <strong>Resolved</strong>, you can rate the outcome or reopen it
+        from Track Complaint if the issue remains unfixed.
       </>
     ),
   },
@@ -69,9 +67,9 @@ const FAQ_ITEMS = [
     q: 'Is my complaint information kept private?',
     a: (
       <>
-        Your personal details are encrypted and only visible to authorised Panchayat officials
-        handling your complaint. Public dashboards show only anonymised, aggregated data — never
-        your identity.
+        Your name and mobile number are masked on tracking views and visible only to authorized
+        Panchayat officials. Public complaint maps display only privacy-safe approximate areas rather
+        than exact addresses.
       </>
     ),
   },
@@ -327,7 +325,7 @@ export default function HomePage() {
               <span className="hiw__step-num">01</span>
               <h3 className="hiw__card-title">Register Complaint</h3>
               <p className="hiw__card-desc">
-                Submit issue details, photos, or voice recordings easily from your phone.
+                Submit issue details, photos, map pin, or voice-to-text easily from your phone.
               </p>
             </div>
 
@@ -466,7 +464,7 @@ export default function HomePage() {
               </div>
               <div className="why__float-card why__float-card--br">
                 <span className="why__float-icon">✅</span>
-                <span>Resolved in 48h</span>
+                <span>Track Online</span>
               </div>
 
               <div className="why__orb" />
@@ -509,9 +507,9 @@ export default function HomePage() {
               <li className="why__feature">
                 <div className="why__feature-icon">🎤</div>
                 <div className="why__feature-body">
-                  <h4 className="why__feature-title">Voice Complaint Recording</h4>
+                  <h4 className="why__feature-title">English &amp; Telugu Voice Input</h4>
                   <p className="why__feature-desc">
-                    Not comfortable typing? Just speak — we&apos;ll capture your complaint.
+                    Prefer speaking? Dictate your complaint in English or Telugu directly into the form.
                   </p>
                 </div>
               </li>
@@ -520,16 +518,16 @@ export default function HomePage() {
                 <div className="why__feature-body">
                   <h4 className="why__feature-title">Location Based Reporting</h4>
                   <p className="why__feature-desc">
-                    Pin the exact problem spot on the map for faster resolution.
+                    Optionally pin the issue location on the map so Panchayat officials know where to inspect.
                   </p>
                 </div>
               </li>
               <li className="why__feature">
-                <div className="why__feature-icon">🔔</div>
+                <div className="why__feature-icon">🔄</div>
                 <div className="why__feature-body">
-                  <h4 className="why__feature-title">Real-Time Status Updates</h4>
+                  <h4 className="why__feature-title">Auto-Refreshing Status</h4>
                   <p className="why__feature-desc">
-                    Get notified at every stage — from submission to resolution.
+                    Check your full status timeline anytime — with automatic status refresh while open.
                   </p>
                 </div>
               </li>
@@ -768,31 +766,14 @@ export default function HomePage() {
             <div className="faq__side">
               <div className="faq__side-card">
                 <div className="faq__side-icon">🤝</div>
-                <h3 className="faq__side-title">Still have questions?</h3>
+                <h3 className="faq__side-title">Need complaint help?</h3>
                 <p className="faq__side-desc">
-                  Our support team is available Monday to Saturday, 9 AM – 6 PM. We typically
-                  respond within 2 hours.
+                  Track your complaint status online anytime using your Complaint ID, or visit your
+                  local Gram Panchayat office for direct assistance.
                 </p>
-                <a href="#contact" className="faq__side-btn">
-                  Contact Support →
-                </a>
-              </div>
-
-              <div className="faq__side-stats">
-                <div className="faq__side-stat">
-                  <span className="faq__side-num">2 hrs</span>
-                  <span className="faq__side-lbl">Avg. response time</span>
-                </div>
-                <div className="faq__side-divider" />
-                <div className="faq__side-stat">
-                  <span className="faq__side-num">98%</span>
-                  <span className="faq__side-lbl">Satisfaction rate</span>
-                </div>
-                <div className="faq__side-divider" />
-                <div className="faq__side-stat">
-                  <span className="faq__side-num">24/7</span>
-                  <span className="faq__side-lbl">Platform uptime</span>
-                </div>
+                <Link to="/track" className="faq__side-btn">
+                  Track Complaint →
+                </Link>
               </div>
             </div>
           </div>

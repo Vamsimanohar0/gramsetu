@@ -13,6 +13,7 @@ const {
 } = require('../middleware/uploadMiddleware');
 const { verifyCitizenEvidenceToken } = require('../utils/evidenceToken');
 const { sendProtectedEvidenceImage } = require('../utils/fileResponse');
+const { readSignedVoterCookie, getOrIssueVoterCookie } = require('../utils/voterCookie');
 
 async function listVillages(_req, res, next) {
   try {
@@ -61,15 +62,17 @@ async function trackComplaint(req, res, next) {
       });
     }
 
+    const voterSession = readSignedVoterCookie(req);
     const result = await complaintService.trackComplaint(
       validation.data.complaintId,
-      validation.data.mobile
+      validation.data.mobile,
+      { voterKeyHmac: voterSession?.voterKeyHmac || '' }
     );
 
     if (!result) {
       return res.status(404).json({
         status: 'error',
-        message: 'Complaint not found. Please verify your Complaint ID and Mobile Number.',
+        message: 'Complaint not found. Please check your Complaint ID and Mobile Number.',
       });
     }
 
@@ -117,10 +120,12 @@ async function submitFeedback(req, res, next) {
 async function listPublicMapComplaints(req, res, next) {
   try {
     const { village_id = '', category = '', status = '' } = req.query;
+    const voterSession = readSignedVoterCookie(req);
     const mapData = await complaintService.getPublicMapComplaints({
       villageId: village_id,
       category,
       status,
+      voterKeyHmac: voterSession?.voterKeyHmac || '',
     });
 
     return res.json({
@@ -132,43 +137,12 @@ async function listPublicMapComplaints(req, res, next) {
   }
 }
 
-async function getVotingStatus(_req, res) {
-  const availability = votingService.getVotingAvailability();
-  return res.json({
-    status: 'success',
-    voting: availability,
-  });
-}
-
-async function startVoteVerification(req, res, next) {
-  try {
-    const validation = validateVoteAction(
-      { ...req.body, complaint_id: req.params.complaintId || req.body?.complaint_id },
-      { requireToken: false }
-    );
-    if (!validation.valid) {
-      return res.status(400).json({
-        status: 'error',
-        message: validation.message,
-      });
-    }
-
-    const challenge = await votingService.initiateVoteChallenge(validation.data);
-    return res.json({
-      status: 'success',
-      challenge,
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
 async function castVote(req, res, next) {
   try {
-    const validation = validateVoteAction(
-      { ...req.body, complaint_id: req.params.complaintId || req.body?.complaint_id },
-      { requireToken: true }
-    );
+    const validation = validateVoteAction({
+      ...req.body,
+      complaint_id: req.params.complaintId || req.body?.complaint_id,
+    });
     if (!validation.valid) {
       return res.status(400).json({
         status: 'error',
@@ -176,10 +150,15 @@ async function castVote(req, res, next) {
       });
     }
 
-    const result = await votingService.castVerifiedVote(validation.data);
+    const { voterKeyHmac } = getOrIssueVoterCookie(req, res);
+    const result = await votingService.castVote({
+      complaintId: validation.data.complaintId,
+      voterKeyHmac,
+    });
+
     return res.status(201).json({
       status: 'success',
-      message: 'Your vote has been recorded.',
+      message: 'Your support vote has been recorded.',
       ...result,
     });
   } catch (err) {
@@ -189,10 +168,10 @@ async function castVote(req, res, next) {
 
 async function withdrawVote(req, res, next) {
   try {
-    const validation = validateVoteAction(
-      { ...req.body, complaint_id: req.params.complaintId || req.body?.complaint_id },
-      { requireToken: true }
-    );
+    const validation = validateVoteAction({
+      ...req.body,
+      complaint_id: req.params.complaintId || req.body?.complaint_id,
+    });
     if (!validation.valid) {
       return res.status(400).json({
         status: 'error',
@@ -200,10 +179,15 @@ async function withdrawVote(req, res, next) {
       });
     }
 
-    const result = await votingService.withdrawVerifiedVote(validation.data);
+    const voterSession = readSignedVoterCookie(req);
+    const result = await votingService.withdrawVote({
+      complaintId: validation.data.complaintId,
+      voterKeyHmac: voterSession?.voterKeyHmac || '',
+    });
+
     return res.json({
       status: 'success',
-      message: 'Your vote has been withdrawn.',
+      message: 'Your support vote has been withdrawn.',
       ...result,
     });
   } catch (err) {
@@ -262,8 +246,6 @@ module.exports = {
   lookupComplaintsByMobile,
   getCitizenEvidence,
   listPublicMapComplaints,
-  getVotingStatus,
-  startVoteVerification,
   castVote,
   withdrawVote,
 };
