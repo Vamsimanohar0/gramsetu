@@ -22,4 +22,4 @@ server/uploads/images/*
 npm-debug.log*
 .DS_Store
 Thumbs.db
-
+*.sql
