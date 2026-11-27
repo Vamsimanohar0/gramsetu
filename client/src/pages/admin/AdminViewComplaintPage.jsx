@@ -141,11 +141,30 @@ export default function AdminViewComplaintPage() {
             </div>
             <div className="admin-detail-box">
               <div className="label">Citizen Name</div>
-              <div className="value">{complaint.name}</div>
+              <div className="value" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span>{complaint.is_anonymous ? 'Anonymous Citizen' : complaint.name || 'N/A'}</span>
+                <span
+                  className={`admin-privacy-pill ${
+                    complaint.privacy_mode === 'ANONYMOUS'
+                      ? 'anonymous'
+                      : complaint.privacy_mode === 'CONSENT'
+                        ? 'consent'
+                        : 'legacy'
+                  }`}
+                >
+                  {complaint.privacy_mode === 'ANONYMOUS'
+                    ? 'Anonymous Complaint'
+                    : complaint.privacy_mode === 'CONSENT'
+                      ? 'Share My Details (Consent)'
+                      : 'Legacy Record'}
+                </span>
+              </div>
             </div>
             <div className="admin-detail-box">
               <div className="label">Mobile Number</div>
-              <div className="value">{complaint.mobile}</div>
+              <div className="value">
+                {complaint.is_anonymous ? 'Hidden (Anonymous Complaint)' : complaint.mobile || 'Not provided'}
+              </div>
             </div>
             <div className="admin-detail-box">
               <div className="label">Village</div>

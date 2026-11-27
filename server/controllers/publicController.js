@@ -43,6 +43,7 @@ async function submitComplaint(req, res, next) {
     return res.status(201).json({
       status: 'success',
       complaint_id: created.complaint_id,
+      privacy_mode: created.privacy_mode,
       message: 'Complaint submitted successfully!',
       images: created.images,
     });

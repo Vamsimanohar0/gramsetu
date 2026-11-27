@@ -76,7 +76,7 @@ describe('GramSetu Live MySQL Integration Tests', { skip: !shouldRun }, () => {
   });
 
   it('runs non-destructive dry-run check for legacy complaints', async () => {
-    const report = await runLegacyCheck({ apply: false });
+    const report = await runLegacyCheck([]);
     assert.ok(Array.isArray(report.unambiguous));
     assert.ok(Array.isArray(report.ambiguous));
     assert.ok(Array.isArray(report.unmatched));

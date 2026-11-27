@@ -179,7 +179,8 @@ export default function AdminMapPage() {
                   </div>
                   <h4>{item.title}</h4>
                   <p>
-                    {item.village} · {item.category} · Citizen: {item.name}
+                    {item.village} · {item.category} · Citizen:{' '}
+                    {item.is_anonymous ? 'Anonymous Citizen' : item.name || 'N/A'}
                   </p>
                   <p>
                     {item.has_location

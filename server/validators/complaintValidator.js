@@ -4,9 +4,18 @@ const { normalizeMobileNumber } = require('../utils/voterHash');
 
 const MOBILE_REGEX = /^[0-9]{10}$/;
 const COMPLAINT_ID_REGEX = /^[A-Za-z0-9-]{4,20}$/;
+const ALLOWED_PRIVACY_MODES = ['ANONYMOUS', 'CONSENT'];
+
+function parseBooleanFlag(value) {
+  if (value === true) return true;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+}
 
 function validateCreateComplaint(body = {}) {
-  const name = String(body.name ?? '').trim();
+  const privacyMode = String(body.privacy_mode ?? '').trim().toUpperCase();
+  const consentAccepted = parseBooleanFlag(body.consent_accepted);
+  const rawName = String(body.name ?? '').trim();
   const mobile = normalizeMobileNumber(body.mobile);
   const villageId = Number.parseInt(body.village_id, 10);
   const wardNo = String(body.ward_no ?? '').trim();
@@ -14,7 +23,7 @@ function validateCreateComplaint(body = {}) {
   const title = String(body.title ?? '').trim();
   const description = String(body.description ?? '').trim();
 
-  if (!name || !mobile || !villageId || Number.isNaN(villageId) || villageId <= 0 || !category || !title || !description) {
+  if (!mobile || !villageId || Number.isNaN(villageId) || villageId <= 0 || !category || !title || !description) {
     return {
       valid: false,
       message: 'Please fill all required fields',
@@ -28,9 +37,33 @@ function validateCreateComplaint(body = {}) {
     };
   }
 
-  if (name.length > 100) {
-    return { valid: false, message: 'Full name must be 100 characters or fewer' };
+  if (!ALLOWED_PRIVACY_MODES.includes(privacyMode)) {
+    return {
+      valid: false,
+      message: 'Please select a valid privacy mode (Anonymous Complaint or Share My Details)',
+    };
   }
+
+  let name = null;
+  if (privacyMode === 'CONSENT') {
+    if (!consentAccepted) {
+      return {
+        valid: false,
+        message: 'Please accept the consent notice before sharing your personal details',
+      };
+    }
+    if (!rawName) {
+      return {
+        valid: false,
+        message: 'Please fill all required fields',
+      };
+    }
+    if (rawName.length > 100) {
+      return { valid: false, message: 'Full name must be 100 characters or fewer' };
+    }
+    name = rawName;
+  }
+
   if (wardNo.length > 20) {
     return { valid: false, message: 'Ward number must be 20 characters or fewer' };
   }
@@ -61,6 +94,8 @@ function validateCreateComplaint(body = {}) {
   return {
     valid: true,
     data: {
+      privacyMode,
+      consentAccepted: privacyMode === 'CONSENT',
       name,
       mobile,
       villageId,

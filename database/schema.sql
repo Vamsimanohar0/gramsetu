@@ -64,11 +64,13 @@ CREATE TABLE IF NOT EXISTS `complaints` (
   `approx_latitude` decimal(10,7) DEFAULT NULL,
   `approx_longitude` decimal(10,7) DEFAULT NULL,
   `location_source` enum('gps','manual') DEFAULT NULL,
+  `privacy_mode` enum('ANONYMOUS','CONSENT') DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `complaint_id` (`complaint_id`),
   KEY `village_id` (`village_id`),
   KEY `panchayath_id` (`panchayath_id`),
   KEY `idx_complaints_approx_coords` (`approx_latitude`, `approx_longitude`),
+  KEY `idx_complaints_privacy_mode` (`privacy_mode`),
   CONSTRAINT `complaints_ibfk_1` FOREIGN KEY (`village_id`) REFERENCES `villages` (`id`),
   CONSTRAINT `complaints_ibfk_2` FOREIGN KEY (`panchayath_id`) REFERENCES `panchayaths` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

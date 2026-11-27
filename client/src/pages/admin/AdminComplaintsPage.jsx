@@ -144,12 +144,29 @@ export default function AdminComplaintsPage() {
               <tbody>
                 {complaints.map((row) => {
                   const statusClass = (row.status || '').toLowerCase().replace(/\s+/g, '-');
+                  const privacyClass =
+                    row.privacy_mode === 'ANONYMOUS'
+                      ? 'anonymous'
+                      : row.privacy_mode === 'CONSENT'
+                        ? 'consent'
+                        : 'legacy';
+                  const privacyLabel =
+                    row.privacy_mode === 'ANONYMOUS'
+                      ? 'Anonymous'
+                      : row.privacy_mode === 'CONSENT'
+                        ? 'Consent'
+                        : 'Legacy';
                   return (
                     <tr key={row.id}>
                       <td>
                         <strong>{row.complaint_id}</strong>
                       </td>
-                      <td>{row.name}</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span>{row.is_anonymous ? 'Anonymous Citizen' : row.name || 'N/A'}</span>
+                          <span className={`admin-privacy-pill ${privacyClass}`}>{privacyLabel}</span>
+                        </div>
+                      </td>
                       <td>{row.village || 'N/A'}</td>
                       <td>{row.category}</td>
                       <td>

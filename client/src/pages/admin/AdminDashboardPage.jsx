@@ -243,7 +243,9 @@ export default function AdminDashboardPage() {
                       <div className="admin-row-text">
                         <strong>{row.title || row.category || row.complaint_id}</strong>
                         <small>
-                          {row.village || 'N/A'} · {formatShortDate(row.created_at)}
+                          {row.village || 'N/A'} ·{' '}
+                          {row.is_anonymous ? 'Anonymous Citizen' : row.name || 'Citizen'} ·{' '}
+                          {formatShortDate(row.created_at)}
                         </small>
                       </div>
                     </div>

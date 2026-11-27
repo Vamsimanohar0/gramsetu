@@ -20,6 +20,10 @@ export default function ComplaintPage() {
   const [villagesLoading, setVillagesLoading] = useState(true);
   const [villagesError, setVillagesError] = useState(false);
 
+  const [privacyMode, setPrivacyMode] = useState('');
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
   const [villageId, setVillageId] = useState('');
@@ -226,6 +230,9 @@ export default function ComplaintPage() {
   };
 
   const resetFormState = () => {
+    setPrivacyMode('');
+    setConsentAccepted(false);
+    setShowConsentModal(false);
     setName('');
     setMobile('');
     setVillageId('');
@@ -241,15 +248,73 @@ export default function ComplaintPage() {
     setVoiceNotice('');
   };
 
+  useEffect(() => {
+    if (!showConsentModal) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setConsentAccepted(false);
+        setShowConsentModal(false);
+        setPrivacyMode((prev) => (prev === 'CONSENT' ? '' : prev));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showConsentModal]);
+
+  const handleSelectAnonymousMode = () => {
+    setPrivacyMode('ANONYMOUS');
+    setConsentAccepted(false);
+    setShowConsentModal(false);
+    setName('');
+  };
+
+  const handleSelectConsentMode = () => {
+    if (privacyMode === 'CONSENT' && consentAccepted) {
+      return;
+    }
+    setConsentAccepted(false);
+    setShowConsentModal(true);
+  };
+
+  const handleCancelConsent = () => {
+    setConsentAccepted(false);
+    setShowConsentModal(false);
+    setPrivacyMode((prev) => (prev === 'CONSENT' ? '' : prev));
+  };
+
+  const handleAgreeConsent = () => {
+    setConsentAccepted(true);
+    setPrivacyMode('CONSENT');
+    setShowConsentModal(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!privacyMode) {
+      showToast('Please choose Anonymous Complaint or Share My Details first');
+      return;
+    }
+
+    if (privacyMode === 'CONSENT' && !consentAccepted) {
+      setShowConsentModal(true);
+      showToast('Please review and agree to the consent notice to share your details');
+      return;
+    }
 
     const trimmedName = name.trim();
     const trimmedMobile = mobile.trim();
     const trimmedTitle = title.trim();
     const trimmedDesc = description.trim();
 
-    if (!trimmedName || !trimmedMobile || !villageId || !category || !trimmedTitle || !trimmedDesc) {
+    if (
+      (privacyMode === 'CONSENT' && !trimmedName) ||
+      !trimmedMobile ||
+      !villageId ||
+      !category ||
+      !trimmedTitle ||
+      !trimmedDesc
+    ) {
       showToast('Please fill all required fields');
       return;
     }
@@ -265,7 +330,11 @@ export default function ComplaintPage() {
     }
 
     const formData = new FormData();
-    formData.append('name', trimmedName);
+    formData.append('privacy_mode', privacyMode);
+    formData.append('consent_accepted', privacyMode === 'CONSENT' && consentAccepted ? 'true' : 'false');
+    if (privacyMode === 'CONSENT') {
+      formData.append('name', trimmedName);
+    }
     formData.append('mobile', trimmedMobile);
     formData.append('village_id', villageId);
     formData.append('ward_no', wardNo.trim());
@@ -329,44 +398,115 @@ export default function ComplaintPage() {
         <div className="form-container">
           <br />
           <form id="complaintForm" className="complaint-form" onSubmit={handleSubmit} noValidate>
-            {/* PERSONAL INFORMATION SECTION */}
+            {/* PERSONAL INFORMATION & PRIVACY MODE SECTION */}
             <div className="form-card">
               <div className="card-header">
-                <i className="fas fa-user-circle" />
+                <i className="fas fa-user-shield" />
                 <h3>
-                  Personal Information <span className="step-badge">Step 1</span>
+                  Privacy &amp; Personal Information <span className="step-badge">Step 1</span>
                 </h3>
               </div>
+
+              <div className="privacy-mode-grid" role="group" aria-label="Privacy mode selection">
+                <button
+                  type="button"
+                  id="anonymousModeBtn"
+                  className={`privacy-mode-option${privacyMode === 'ANONYMOUS' ? ' active' : ''}`}
+                  aria-pressed={privacyMode === 'ANONYMOUS'}
+                  onClick={handleSelectAnonymousMode}
+                >
+                  <span className="privacy-mode-title">
+                    <i className="fas fa-user-secret" /> Anonymous Complaint
+                  </span>
+                  <span className="privacy-mode-desc">
+                    Do not ask for your name. Your mobile number is stored privately for status lookup and never shown to Panchayat officials.
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  id="consentModeBtn"
+                  className={`privacy-mode-option${privacyMode === 'CONSENT' && consentAccepted ? ' active' : ''}`}
+                  aria-pressed={privacyMode === 'CONSENT' && consentAccepted}
+                  onClick={handleSelectConsentMode}
+                >
+                  <span className="privacy-mode-title">
+                    <i className="fas fa-handshake" /> Share My Details
+                    <span className="privacy-mode-badge">Consent Mode</span>
+                  </span>
+                  <span className="privacy-mode-desc">
+                    Review a quick consent notice before sharing your name and mobile number with relevant Panchayat officials.
+                  </span>
+                </button>
+              </div>
+
+              {!privacyMode && (
+                <div className="privacy-mode-prompt" role="status">
+                  <i className="fas fa-info-circle" style={{ color: '#7DFF6A', marginTop: '2px' }} />
+                  <span>
+                    Please choose either <strong>Anonymous Complaint</strong> or <strong>Share My Details</strong> above before entering personal details.
+                  </span>
+                </div>
+              )}
+
+              {privacyMode === 'ANONYMOUS' && (
+                <div className="privacy-mode-banner anonymous" role="status">
+                  <i className="fas fa-shield-alt" style={{ marginTop: '2px' }} />
+                  <span>
+                    <strong>Anonymous Complaint active:</strong> Your name is not required, and your mobile number will never appear in Admin or Panchayat dashboards.
+                  </span>
+                </div>
+              )}
+
+              {privacyMode === 'CONSENT' && consentAccepted && (
+                <div className="privacy-mode-banner consent" role="status">
+                  <i className="fas fa-check-circle" style={{ marginTop: '2px' }} />
+                  <span>
+                    <strong>Consent accepted:</strong> Your name and mobile number will be visible to relevant Panchayat officials so they can contact you regarding your complaint.
+                  </span>
+                </div>
+              )}
+
               <div className="form-grid">
-                <div className="input-group">
-                  <label htmlFor="fullName">
-                    <i className="fas fa-user" /> Full Name
-                  </label>
-                  <input
-                    type="text"
-                    id="fullName"
-                    name="name"
-                    placeholder="e.g. Lakshmi Devi"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="input-group">
-                  <label htmlFor="mobile">
-                    <i className="fas fa-phone-alt" /> Mobile Number
-                  </label>
-                  <input
-                    type="tel"
-                    id="mobile"
-                    name="mobile"
-                    placeholder="10-digit number"
-                    pattern="[0-9]{10}"
-                    value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
-                    required
-                  />
-                </div>
+                {privacyMode === 'CONSENT' && consentAccepted && (
+                  <div className="input-group">
+                    <label htmlFor="fullName">
+                      <i className="fas fa-user" /> Full Name
+                    </label>
+                    <input
+                      type="text"
+                      id="fullName"
+                      name="name"
+                      placeholder="e.g. Lakshmi Devi"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                    />
+                  </div>
+                )}
+
+                {(privacyMode === 'ANONYMOUS' || (privacyMode === 'CONSENT' && consentAccepted)) && (
+                  <div className="input-group">
+                    <label htmlFor="mobile">
+                      <i className="fas fa-phone-alt" /> Mobile Number
+                    </label>
+                    <input
+                      type="tel"
+                      id="mobile"
+                      name="mobile"
+                      placeholder="10-digit number"
+                      pattern="[0-9]{10}"
+                      value={mobile}
+                      onChange={(e) => setMobile(e.target.value)}
+                      required
+                    />
+                    {privacyMode === 'ANONYMOUS' && (
+                      <p className="field-privacy-hint">
+                        Used only so you can find and track your complaint later; hidden from officials.
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div className="input-group">
                   <label htmlFor="village_id">
                     <i className="fas fa-map-marker-alt" /> Village Name
@@ -672,6 +812,60 @@ export default function ComplaintPage() {
             </div>
           </div>
         </div>
+
+        {/* CONSENT MODAL */}
+        {showConsentModal && (
+          <div
+            id="consentModal"
+            className="success-modal"
+            style={{ display: 'flex' }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="consentModalTitle"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                handleCancelConsent();
+              }
+            }}
+          >
+            <div className="success-modal-content consent-modal-content">
+              <div className="consent-modal-header">
+                <h2 id="consentModalTitle">
+                  <i className="fas fa-user-check" /> Share My Details
+                </h2>
+                <button
+                  type="button"
+                  className="consent-modal-close"
+                  aria-label="Close consent notice"
+                  onClick={handleCancelConsent}
+                >
+                  <i className="fas fa-times" />
+                </button>
+              </div>
+              <div className="consent-modal-body">
+                Your name and mobile number will be visible to the relevant Panchayat officials so they can contact you regarding your complaint.
+              </div>
+              <div className="consent-modal-actions">
+                <button
+                  type="button"
+                  id="cancelConsentBtn"
+                  className="btn-secondary-modal"
+                  onClick={handleCancelConsent}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  id="agreeConsentBtn"
+                  className="btn-primary-modal"
+                  onClick={handleAgreeConsent}
+                >
+                  I Agree
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* SUCCESS MODAL */}
         <div

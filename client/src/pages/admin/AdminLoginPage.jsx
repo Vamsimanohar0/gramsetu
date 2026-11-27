@@ -113,7 +113,7 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          {import.meta.env.DEV && (
+          {/* {import.meta.env.DEV && (
             <div className="demo-credentials">
               <i className="fas fa-info-circle" style={{ color: '#7DFF6A' }} /> Demo Credentials:
               <div className="creds">
@@ -122,7 +122,7 @@ export default function AdminLoginPage() {
                 <span>narasaraopet / admin</span>
               </div>
             </div>
-          )}
+          )} */}
         </div>
       </div>
     </div>

@@ -111,6 +111,13 @@ function toNullableNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+function normalizePrivacyMode(value) {
+  if (value === 'ANONYMOUS' || value === 'CONSENT') {
+    return value;
+  }
+  return null;
+}
+
 function formatAdminComplaintRow(row, voteCountMap = null) {
   if (!row) return null;
   const latitude = toNullableNumber(row.latitude);
@@ -119,9 +126,15 @@ function formatAdminComplaintRow(row, voteCountMap = null) {
   const approxLongitude = toNullableNumber(row.approx_longitude);
   const resolvedVoteCount =
     voteCountMap && row.id ? voteCountMap.get(Number(row.id)) : undefined;
+  const privacyMode = normalizePrivacyMode(row.privacy_mode);
+  const isAnonymous = privacyMode === 'ANONYMOUS';
 
   return {
     ...row,
+    privacy_mode: privacyMode,
+    is_anonymous: isAnonymous,
+    name: isAnonymous ? 'Anonymous Citizen' : row.name || 'N/A',
+    mobile: isAnonymous ? null : row.mobile || null,
     village: row.village_name || row.village || 'N/A',
     images: buildAdminImageUrls(row.id, row.image_path),
     latitude,
@@ -142,11 +155,15 @@ function formatPublicComplaintRow(row, { voteCountMap = null, userVotedSet = nul
     voteCountMap && row.id ? voteCountMap.get(Number(row.id)) : undefined;
   const hasUserVoted =
     userVotedSet && row.id ? userVotedSet.has(Number(row.id)) : Boolean(row.user_voted);
+  const privacyMode = normalizePrivacyMode(row.privacy_mode);
+  const isAnonymous = privacyMode === 'ANONYMOUS';
 
   return {
     complaint_id: row.complaint_id,
-    name: maskPersonName(row.name),
-    mobile: maskMobile(row.mobile),
+    privacy_mode: privacyMode,
+    is_anonymous: isAnonymous,
+    name: isAnonymous ? 'Anonymous Citizen' : maskPersonName(row.name),
+    mobile: isAnonymous ? 'Hidden (Anonymous)' : maskMobile(row.mobile),
     village_id: row.village_id || null,
     village: row.village_name || row.village || 'N/A',
     ward_no: row.ward_no || '',
@@ -221,6 +238,7 @@ async function createComplaint(data, uploadedFiles = []) {
       : { approxLatitude: null, approxLongitude: null };
 
     let insertResult;
+    const storedName = data.privacyMode === 'ANONYMOUS' ? null : data.name;
     try {
       [insertResult] = await connection.execute(
         `INSERT INTO complaints (
@@ -239,12 +257,13 @@ async function createComplaint(data, uploadedFiles = []) {
           approx_latitude,
           approx_longitude,
           location_source,
+          privacy_mode,
           status,
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
         [
           complaintId,
-          data.name,
+          storedName,
           data.mobile,
           data.villageId,
           panchayathId,
@@ -258,6 +277,7 @@ async function createComplaint(data, uploadedFiles = []) {
           approxLatitude,
           approxLongitude,
           hasCoords ? data.locationSource : null,
+          data.privacyMode || null,
         ]
       );
     } catch (insertErr) {
@@ -265,6 +285,13 @@ async function createComplaint(data, uploadedFiles = []) {
         throw insertErr;
       }
       logOptionalTableWarning(insertErr);
+      if (data.privacyMode === 'ANONYMOUS') {
+        const schemaErr = new Error(
+          'Anonymous complaints require applying database migration 006_add_privacy_mode.sql first.'
+        );
+        schemaErr.statusCode = 503;
+        throw schemaErr;
+      }
       if (hasCoords) {
         const schemaErr = new Error(
           'Location pinning requires applying database migration 005_repair_vgmp_schema.sql first, or submit without a map pin.'
@@ -289,7 +316,7 @@ async function createComplaint(data, uploadedFiles = []) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
         [
           complaintId,
-          data.name,
+          storedName,
           data.mobile,
           data.villageId,
           panchayathId,
@@ -325,6 +352,7 @@ async function createComplaint(data, uploadedFiles = []) {
 
     return {
       complaint_id: complaintId,
+      privacy_mode: data.privacyMode || null,
       images: imagePaths.map((p) => path.basename(p)),
       has_location: hasCoords,
       approx_latitude: approxLatitude,
@@ -690,7 +718,9 @@ async function getAdminComplaints(panchayathId, { status = '', search = '', vill
 
   const trimmedSearch = String(search || '').trim();
   if (trimmedSearch) {
-    conditions.push('(c.name LIKE ? OR c.complaint_id LIKE ? OR c.mobile LIKE ?)');
+    conditions.push(
+      "(c.complaint_id LIKE ? OR ((c.privacy_mode IS NULL OR c.privacy_mode <> 'ANONYMOUS') AND (c.name LIKE ? OR c.mobile LIKE ?)))"
+    );
     const likeTerm = `%${trimmedSearch}%`;
     params.push(likeTerm, likeTerm, likeTerm);
   }
@@ -918,7 +948,7 @@ async function getAdminMapComplaints(panchayathId, { villageId = '', category = 
   let rows;
   try {
     [rows] = await pool.execute(
-      `SELECT c.id, c.complaint_id, c.name, c.village_id, COALESCE(v.name, c.village) AS village_name,
+      `SELECT c.id, c.complaint_id, c.name, c.privacy_mode, c.village_id, COALESCE(v.name, c.village) AS village_name,
               c.ward_no, c.category, c.title, c.status, c.latitude, c.longitude,
               c.approx_latitude, c.approx_longitude, c.location_source, c.created_at
        FROM complaints c

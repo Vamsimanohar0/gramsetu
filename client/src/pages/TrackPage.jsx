@@ -607,7 +607,9 @@ export default function TrackPage() {
                 </div>
                 <div className="detail-item">
                   <div className="label">Citizen</div>
-                  <div className="value">{complaint.name || 'N/A'}</div>
+                  <div className="value">
+                    {complaint.is_anonymous ? 'Anonymous Citizen' : complaint.name || 'N/A'}
+                  </div>
                 </div>
                 <div className="detail-item">
                   <div className="label">Category</div>
@@ -615,7 +617,9 @@ export default function TrackPage() {
                 </div>
                 <div className="detail-item">
                   <div className="label">Mobile</div>
-                  <div className="value">{complaint.mobile}</div>
+                  <div className="value">
+                    {complaint.is_anonymous ? 'Hidden (Anonymous)' : complaint.mobile}
+                  </div>
                 </div>
                 <div className="detail-item">
                   <div className="label">Village</div>

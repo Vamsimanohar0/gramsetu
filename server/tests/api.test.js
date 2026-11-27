@@ -349,6 +349,8 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
     });
 
     const baseFields = {
+      privacy_mode: 'CONSENT',
+      consent_accepted: 'true',
       name: 'Lakshmi Devi',
       mobile: '9876543210',
       village_id: '1',
@@ -695,6 +697,8 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
     assert.notEqual(approx.approxLongitude, exact.lng);
 
     const validCreateWithLocation = validateCreateComplaint({
+      privacy_mode: 'CONSENT',
+      consent_accepted: true,
       name: 'Rama Rao',
       mobile: '+91 9876543210',
       village_id: '1',
@@ -1146,6 +1150,8 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
       method: 'POST',
       url: '/api/complaints',
       body: {
+        privacy_mode: 'CONSENT',
+        consent_accepted: true,
         name: 'Anitha',
         mobile: '9876543211',
         village_id: '1',
@@ -1163,6 +1169,8 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
       method: 'POST',
       url: '/api/complaints',
       body: {
+        privacy_mode: 'CONSENT',
+        consent_accepted: true,
         name: 'Anitha',
         mobile: '9876543211',
         village_id: '1',
@@ -1215,5 +1223,301 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
     const safeSchemaErr = await invokeApp(app, { method: 'GET', url: '/api/villages' });
     assert.equal(safeSchemaErr.status, 503);
     assert.doesNotMatch(safeSchemaErr.body.message, /Unknown column|foo/i);
+  });
+
+  it('enforces Anonymous Mode and Consent Mode validation, storage, admin privacy, and lookup', async () => {
+    // 1. Validator rules for privacy_mode and consent_accepted
+    const missingMode = validateCreateComplaint({
+      name: 'Sita',
+      mobile: '9876543210',
+      village_id: '1',
+      category: 'Water Supply',
+      title: 'No water',
+      description: 'Main pipeline dry',
+    });
+    assert.equal(missingMode.valid, false);
+
+    const consentNoAgree = validateCreateComplaint({
+      privacy_mode: 'CONSENT',
+      consent_accepted: 'false',
+      name: 'Sita',
+      mobile: '9876543210',
+      village_id: '1',
+      category: 'Water Supply',
+      title: 'No water',
+      description: 'Main pipeline dry',
+    });
+    assert.equal(consentNoAgree.valid, false);
+    assert.match(consentNoAgree.message, /consent/i);
+
+    const consentNoName = validateCreateComplaint({
+      privacy_mode: 'CONSENT',
+      consent_accepted: true,
+      name: '',
+      mobile: '9876543210',
+      village_id: '1',
+      category: 'Water Supply',
+      title: 'No water',
+      description: 'Main pipeline dry',
+    });
+    assert.equal(consentNoName.valid, false);
+
+    const consentValid = validateCreateComplaint({
+      privacy_mode: 'CONSENT',
+      consent_accepted: true,
+      name: 'Sita',
+      mobile: '9876543210',
+      village_id: '1',
+      category: 'Water Supply',
+      title: 'No water',
+      description: 'Main pipeline dry',
+    });
+    assert.equal(consentValid.valid, true);
+    assert.equal(consentValid.data.privacyMode, 'CONSENT');
+    assert.equal(consentValid.data.name, 'Sita');
+    assert.equal(consentValid.data.mobile, '9876543210');
+
+    const anonValid = validateCreateComplaint({
+      privacy_mode: 'ANONYMOUS',
+      name: 'ShouldBeIgnored',
+      mobile: '9876543210',
+      village_id: '1',
+      category: 'Road Damage',
+      title: 'Potholes',
+      description: 'Deep potholes near school',
+    });
+    assert.equal(anonValid.valid, true);
+    assert.equal(anonValid.data.privacyMode, 'ANONYMOUS');
+    assert.equal(anonValid.data.name, null);
+    assert.equal(anonValid.data.mobile, '9876543210');
+
+    // 2. POST /api/complaints persists ANONYMOUS with null name and plain-text mobile
+    let capturedInsertParams = null;
+    pool.getConnection = async () => ({
+      beginTransaction: async () => {},
+      execute: async (sql, params) => {
+        if (sql.includes('FROM villages')) return [[{ id: 1, panchayath_id: 1 }]];
+        if (sql.includes('SELECT id FROM complaints')) return [[]];
+        if (sql.includes('INSERT INTO complaints')) {
+          capturedInsertParams = params;
+          return [{ insertId: 77 }];
+        }
+        return [{ affectedRows: 1 }];
+      },
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+    });
+
+    const anonCreate = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints',
+      body: {
+        privacy_mode: 'ANONYMOUS',
+        mobile: '9876500001',
+        village_id: '1',
+        category: 'Road Damage',
+        title: 'Anonymous issue',
+        description: 'Broken drain near bus stand',
+      },
+    });
+    assert.equal(anonCreate.status, 201);
+    assert.equal(anonCreate.body.privacy_mode, 'ANONYMOUS');
+    assert.ok(Array.isArray(capturedInsertParams));
+    assert.equal(capturedInsertParams[1], null); // name is null
+    assert.equal(capturedInsertParams[2], '9876500001'); // plain-text mobile stored for lookup
+    assert.equal(capturedInsertParams[capturedInsertParams.length - 1], 'ANONYMOUS');
+
+    // Fails closed with 503 if ANONYMOUS submitted before migration 006 column exists
+    pool.getConnection = async () => ({
+      beginTransaction: async () => {},
+      execute: async (sql) => {
+        if (sql.includes('FROM villages')) return [[{ id: 1, panchayath_id: 1 }]];
+        if (sql.includes('SELECT id FROM complaints')) return [[]];
+        if (sql.includes('INSERT INTO complaints')) {
+          const badField = new Error("Unknown column 'privacy_mode' in 'field list'");
+          badField.code = 'ER_BAD_FIELD_ERROR';
+          badField.errno = 1054;
+          throw badField;
+        }
+        return [{ affectedRows: 1 }];
+      },
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+    });
+    const anonUnmigrated = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints',
+      body: {
+        privacy_mode: 'ANONYMOUS',
+        mobile: '9876500001',
+        village_id: '1',
+        category: 'Road Damage',
+        title: 'Anonymous issue',
+        description: 'Broken drain near bus stand',
+      },
+    });
+    assert.equal(anonUnmigrated.status, 503);
+
+    // 3. Admin APIs hide anonymous citizen identity, expose consent/legacy, and guard mobile search
+    const hash = await bcrypt.hash('admin', 4);
+    const sampleRows = [
+      {
+        id: 77,
+        complaint_id: 'GS-2026-77001',
+        name: 'LeakedNameShouldBeMasked',
+        mobile: '9876500001',
+        privacy_mode: 'ANONYMOUS',
+        village_id: 1,
+        village_name: 'Kondapalli',
+        category: 'Road Damage',
+        title: 'Anonymous issue',
+        description: 'Broken drain near bus stand',
+        status: 'Submitted',
+        created_at: '2026-06-26T10:00:00Z',
+      },
+      {
+        id: 78,
+        complaint_id: 'GS-2026-77002',
+        name: 'Rama Devi',
+        mobile: '9876500002',
+        privacy_mode: 'CONSENT',
+        village_id: 1,
+        village_name: 'Kondapalli',
+        category: 'Water Supply',
+        title: 'Consent issue',
+        description: 'Tap leaking',
+        status: 'Submitted',
+        created_at: '2026-06-26T11:00:00Z',
+      },
+      {
+        id: 79,
+        complaint_id: 'GS-2026-77003',
+        name: 'Legacy Citizen',
+        mobile: '9876500003',
+        privacy_mode: null,
+        village_id: 1,
+        village_name: 'Kondapalli',
+        category: 'Other',
+        title: 'Legacy issue',
+        description: 'Existing pre-feature row',
+        status: 'Submitted',
+        created_at: '2026-06-25T11:00:00Z',
+      },
+    ];
+
+    let capturedSearchSql = '';
+    pool.execute = async (sql, params) => {
+      if (sql.includes('WHERE username = ?')) {
+        return [[{ id: 1, name: 'Kondapalli', username: 'kondapalli', password: hash, status: 'active' }]];
+      }
+      if (sql.includes('FROM panchayaths WHERE id = ?')) {
+        return [[{ id: 1, name: 'Kondapalli', username: 'kondapalli', email: '', status: 'active' }]];
+      }
+      if (sql.includes('FROM villages WHERE panchayath_id = ?')) {
+        return [[{ id: 1, name: 'Kondapalli' }]];
+      }
+      if (sql.includes('WHERE c.complaint_id = ? AND c.mobile = ?')) {
+        return [[sampleRows[0]]];
+      }
+      if (sql.includes('SELECT complaint_id, title, status, created_at') && sql.includes('WHERE mobile = ?')) {
+        return [[{ complaint_id: 'GS-2026-77001', title: 'Anonymous issue', status: 'Submitted', created_at: '2026-06-26T10:00:00Z' }]];
+      }
+      if (sql.includes('GROUP BY status')) {
+        return [[{ status: 'Submitted', total: 3 }]];
+      }
+      if (sql.includes('c.privacy_mode <> \'ANONYMOUS\'')) {
+        capturedSearchSql = sql;
+        return [[sampleRows[1]]];
+      }
+      if (sql.includes('WHERE c.id = ?')) {
+        const match = sampleRows.find((r) => r.id === params[0]);
+        return [match ? [match] : []];
+      }
+      if (sql.includes('FROM complaints c')) {
+        return [sampleRows];
+      }
+      return [[]];
+    };
+
+    const loginRes = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/admin/login',
+      body: { username: 'kondapalli', password: 'admin' },
+    });
+    assert.equal(loginRes.status, 200);
+    const cookie = String(loginRes.headers['set-cookie']).split(';')[0];
+
+    const listRes = await invokeApp(app, {
+      method: 'GET',
+      url: '/api/admin/complaints',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(listRes.status, 200);
+    const anonRow = listRes.body.complaints.find((c) => c.id === 77);
+    const consentRow = listRes.body.complaints.find((c) => c.id === 78);
+    const legacyRow = listRes.body.complaints.find((c) => c.id === 79);
+    assert.equal(anonRow.name, 'Anonymous Citizen');
+    assert.equal(anonRow.mobile, null);
+    assert.equal(anonRow.is_anonymous, true);
+    assert.equal(consentRow.name, 'Rama Devi');
+    assert.equal(consentRow.mobile, '9876500002');
+    assert.equal(consentRow.privacy_mode, 'CONSENT');
+    assert.equal(legacyRow.name, 'Legacy Citizen');
+    assert.equal(legacyRow.mobile, '9876500003');
+    assert.equal(legacyRow.privacy_mode, null);
+
+    const detailAnon = await invokeApp(app, {
+      method: 'GET',
+      url: '/api/admin/complaints/77',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(detailAnon.status, 200);
+    assert.equal(detailAnon.body.complaint.name, 'Anonymous Citizen');
+    assert.equal(detailAnon.body.complaint.mobile, null);
+
+    const mapAnon = await invokeApp(app, {
+      method: 'GET',
+      url: '/api/admin/complaints/map',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(mapAnon.status, 200);
+    const mapAnonRow = mapAnon.body.complaints.find((c) => c.id === 77);
+    assert.equal(mapAnonRow.name, 'Anonymous Citizen');
+    assert.equal(mapAnonRow.mobile, null);
+
+    const searchRes = await invokeApp(app, {
+      method: 'GET',
+      url: '/api/admin/complaints?search=9876500001',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(searchRes.status, 200);
+    assert.match(capturedSearchSql, /c\.privacy_mode <> 'ANONYMOUS'/);
+
+    const dashAnon = await invokeApp(app, {
+      method: 'GET',
+      url: '/api/admin/dashboard',
+      headers: { Cookie: cookie },
+    });
+    assert.equal(dashAnon.status, 200);
+    const dashAnonRow = dashAnon.body.recentComplaints.find((c) => c.id === 77);
+    assert.equal(dashAnonRow.name, 'Anonymous Citizen');
+    assert.equal(dashAnonRow.mobile, null);
+
+    // 4. Tracking shows Anonymous Citizen & preserves Lookup by plain-text mobile
+    const trackAnon = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints/track',
+      body: { complaint_id: 'GS-2026-77001', mobile: '9876500001' },
+    });
+    assert.equal(trackAnon.status, 200);
+    assert.equal(trackAnon.body.complaint.name, 'Anonymous Citizen');
+    assert.equal(trackAnon.body.complaint.mobile, 'Hidden (Anonymous)');
+
+    const { findComplaintsByMobile } = require('../services/complaintService');
+    const lookupRows = await findComplaintsByMobile('9876500001');
+    assert.equal(lookupRows.length, 1);
+    assert.equal(lookupRows[0].complaint_id, 'GS-2026-77001');
   });
 });

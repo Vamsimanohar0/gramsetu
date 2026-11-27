@@ -409,3 +409,212 @@
   color: #38bdf8;
 }
 
+/* Citizen Complaint Privacy Mode Selector & Consent Modal */
+.page-complaint .privacy-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 680px) {
+  .page-complaint .privacy-mode-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.page-complaint .privacy-mode-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(125, 255, 106, 0.2);
+  background: rgba(10, 26, 20, 0.72);
+  color: #e6f7ef;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.page-complaint .privacy-mode-option:hover {
+  border-color: rgba(125, 255, 106, 0.55);
+  background: rgba(20, 48, 36, 0.85);
+}
+
+.page-complaint .privacy-mode-option.active {
+  border-color: #4ade80;
+  background: rgba(34, 197, 94, 0.16);
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.35);
+}
+
+.page-complaint .privacy-mode-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.page-complaint .privacy-mode-title i {
+  color: #7DFF6A;
+}
+
+.page-complaint .privacy-mode-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(125, 255, 106, 0.15);
+  color: #86efac;
+  border: 1px solid rgba(125, 255, 106, 0.28);
+}
+
+.page-complaint .privacy-mode-desc {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #9fc2b6;
+}
+
+.page-complaint .privacy-mode-prompt,
+.page-complaint .privacy-mode-banner {
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.page-complaint .privacy-mode-prompt {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  color: #cbd5e1;
+}
+
+.page-complaint .privacy-mode-banner.anonymous {
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  color: #bae6fd;
+}
+
+.page-complaint .privacy-mode-banner.consent {
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.32);
+  color: #bbf7d0;
+}
+
+.page-complaint .field-privacy-hint {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: #9fc2b6;
+}
+
+.page-complaint .consent-modal-content {
+  max-width: 470px;
+  text-align: left;
+}
+
+.page-complaint .consent-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.page-complaint .consent-modal-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-complaint .consent-modal-close {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #cbd5e1;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-complaint .consent-modal-close:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.page-complaint .consent-modal-body {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(74, 222, 128, 0.22);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 12px 0 18px;
+  color: #e6f7ef;
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.page-complaint .consent-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.page-complaint .btn-secondary-modal {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 0.7rem 1.35rem;
+  border-radius: 50px;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.page-complaint .btn-secondary-modal:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Admin Privacy Mode Pills */
+.admin-privacy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-privacy-pill.anonymous {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  color: #7dd3fc;
+}
+
+.admin-privacy-pill.consent {
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(74, 222, 128, 0.32);
+  color: #86efac;
+}
+
+.admin-privacy-pill.legacy {
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  color: #cbd5e1;
+}
+
