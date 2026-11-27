@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { apiRequest } from '../../services/api';
 import '../../styles/admin-complaints.css';
 
-const FILTER_STATUSES = ['', 'Submitted', 'Verified', 'In Progress', 'Resolved', 'Rejected'];
+const FILTER_STATUSES = ['', 'Submitted', 'Verified', 'Assigned', 'In Progress', 'Resolved', 'Rejected'];
 
 function formatShortDate(dateValue) {
   if (!dateValue) return 'N/A';

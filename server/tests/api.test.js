@@ -21,6 +21,8 @@ const {
 const { parseCoordinatePair, toApproximateCoordinates } = require('../utils/locationUtils');
 const { normalizeMobileNumber, hashVoterKey } = require('../utils/voterHash');
 const {
+  ALLOWED_STATUSES,
+  ADMIN_UI_STATUSES,
   parseImagePaths,
   generateComplaintId,
   maskPersonName,
@@ -1110,5 +1112,108 @@ describe('GramSetu Backend Unit & Integration Tests (Mocked DB)', () => {
       headers: { Cookie: voterCookiePair },
     });
     assert.equal(voteRejected.status, 400);
+  });
+
+  it('handles missing location columns (ER_BAD_FIELD_ERROR) gracefully across submission, maps, and errorHandler, and aligns admin UI statuses', async () => {
+    assert.deepEqual(ADMIN_UI_STATUSES, ALLOWED_STATUSES);
+    assert.ok(ALLOWED_STATUSES.includes('Assigned'));
+
+    // Submission without coords falls back cleanly to legacy 10-column INSERT on ER_BAD_FIELD_ERROR
+    let insertAttempt = 0;
+    pool.getConnection = async () => ({
+      beginTransaction: async () => {},
+      execute: async (sql) => {
+        if (sql.includes('FROM villages')) return [[{ id: 1, panchayath_id: 1 }]];
+        if (sql.includes('SELECT id FROM complaints')) return [[]];
+        if (sql.includes('INSERT INTO complaints')) {
+          insertAttempt += 1;
+          if (sql.includes('approx_latitude')) {
+            const badField = new Error("Unknown column 'latitude' in 'field list'");
+            badField.code = 'ER_BAD_FIELD_ERROR';
+            badField.errno = 1054;
+            throw badField;
+          }
+          return [{ insertId: 44 }];
+        }
+        return [{ affectedRows: 1 }];
+      },
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+    });
+
+    const fallbackCreate = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints',
+      body: {
+        name: 'Anitha',
+        mobile: '9876543211',
+        village_id: '1',
+        ward_no: '3',
+        category: 'Water Supply',
+        title: 'Pipe leak',
+        description: 'Water leaking near school gate',
+      },
+    });
+    assert.equal(fallbackCreate.status, 201);
+    assert.equal(insertAttempt, 2);
+
+    // Submission WITH coords returns controlled 503 without leaking raw SQL error when columns missing
+    const pinnedUnmigrated = await invokeApp(app, {
+      method: 'POST',
+      url: '/api/complaints',
+      body: {
+        name: 'Anitha',
+        mobile: '9876543211',
+        village_id: '1',
+        category: 'Water Supply',
+        title: 'Pipe leak',
+        description: 'Water leaking near school gate',
+        latitude: '16.5062',
+        longitude: '80.6480',
+      },
+    });
+    assert.equal(pinnedUnmigrated.status, 503);
+    assert.doesNotMatch(pinnedUnmigrated.body.message, /Unknown column/i);
+
+    // Public map falls back to unmapped list cleanly on ER_BAD_FIELD_ERROR
+    pool.execute = async (sql) => {
+      if (sql.includes('c.approx_latitude')) {
+        const badField = new Error("Unknown column 'c.approx_latitude' in 'field list'");
+        badField.code = 'ER_BAD_FIELD_ERROR';
+        badField.errno = 1054;
+        throw badField;
+      }
+      if (sql.includes('FROM complaints c')) {
+        return [[{
+          id: 44,
+          complaint_id: 'GS-2026-44444',
+          village_id: 1,
+          village_name: 'Kondapalli',
+          category: 'Water Supply',
+          title: 'Pipe leak',
+          status: 'Submitted',
+          created_at: '2026-06-26T10:00:00Z',
+        }]];
+      }
+      return [[]];
+    };
+
+    const mapFallback = await invokeApp(app, { method: 'GET', url: '/api/complaints/map' });
+    assert.equal(mapFallback.status, 200);
+    assert.equal(mapFallback.body.summary.total, 1);
+    assert.equal(mapFallback.body.summary.mapped, 0);
+    assert.equal(mapFallback.body.summary.unmapped, 1);
+
+    // Direct ER_BAD_FIELD_ERROR bubbles to safe 503 without raw SQL leak
+    pool.execute = async () => {
+      const badField = new Error("Unknown column 'foo' in 'field list'");
+      badField.code = 'ER_BAD_FIELD_ERROR';
+      badField.errno = 1054;
+      throw badField;
+    };
+    const safeSchemaErr = await invokeApp(app, { method: 'GET', url: '/api/villages' });
+    assert.equal(safeSchemaErr.status, 503);
+    assert.doesNotMatch(safeSchemaErr.body.message, /Unknown column|foo/i);
   });
 });
