@@ -2,16 +2,20 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { apiRequest } from '../../services/api';
+<<<<<<< HEAD
+import AdminLayout from '../../components/AdminLayout';
+import ComplaintTrendChart from '../../components/ComplaintTrendChart';
+=======
 import '../../styles/admin-dashboard.css';
 
 const CHART_ITEMS = [
   { label: 'Submitted', color: '#f9b84a' },
   { label: 'Verified', color: '#3498db' },
-  { label: 'Assigned', color: '#38bdf8' },
   { label: 'In Progress', color: '#7DFF6A' },
   { label: 'Resolved', color: '#2ecc71' },
   { label: 'Rejected', color: '#ff6b6b' },
 ];
+>>>>>>> parent of 3a6ae12 (DB update)
 
 function formatShortDate(dateValue) {
   if (!dateValue) return 'N/A';
@@ -76,15 +80,49 @@ export default function AdminDashboardPage() {
   };
   const urgentCount = data?.urgentCount ?? (stats.Submitted || 0) + (stats.Verified || 0);
   const recentComplaints = data?.recentComplaints || [];
+<<<<<<< HEAD
+
+  const totalCount = Math.max(0, stats.total || 0);
+  const safeDenom = Math.max(1, totalCount);
+  const pendingTotal = (stats.Submitted || 0) + (stats.Verified || 0) + (stats.Assigned || 0);
+  const inProgressTotal = stats['In Progress'] || 0;
+  const resolvedTotal = stats.Resolved || 0;
+  const rejectedTotal = stats.Rejected || 0;
+
+  const recentInWindow =
+    statRange === 'ALL'
+      ? totalCount
+      : recentComplaints.filter((c) => {
+          const ts = c.created_at ? new Date(c.created_at).getTime() : 0;
+          const days = statRange === '7D' ? 7 : 30;
+          return ts >= Date.now() - days * 24 * 60 * 60 * 1000;
+        }).length;
+
+  const filteredRecent = recentComplaints.filter((row) => {
+    if (recentFilter === 'open') {
+      return row.status !== 'Resolved' && row.status !== 'Rejected';
+    }
+    if (recentFilter === 'closed') {
+      return row.status === 'Resolved' || row.status === 'Rejected';
+    }
+    return true;
+  });
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    navigate(q ? `/admin/complaints?search=${encodeURIComponent(q)}` : '/admin/complaints');
+  };
+=======
   const maxCount = Math.max(
     1,
     stats.Submitted || 0,
     stats.Verified || 0,
-    stats.Assigned || 0,
     stats['In Progress'] || 0,
     stats.Resolved || 0,
     stats.Rejected || 0
   );
+>>>>>>> parent of 3a6ae12 (DB update)
 
   return (
     <AdminLayout
