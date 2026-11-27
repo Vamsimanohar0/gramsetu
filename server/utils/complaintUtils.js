@@ -12,7 +12,6 @@ const ALLOWED_STATUSES = [
 const ADMIN_UI_STATUSES = [
   'Submitted',
   'Verified',
-  'Assigned',
   'In Progress',
   'Resolved',
   'Rejected',

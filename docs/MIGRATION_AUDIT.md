@@ -9,7 +9,6 @@
 > - Production-safe seed separation (`seed.sql` inactive placeholders vs `seed.dev.sql` dev demo accounts) and runtime blocking of shared default/plaintext passwords in `NODE_ENV=production`.
 > - `HttpOnly` cookie-only authentication (no `localStorage` JWT) and dev-only demo credentials (`import.meta.env.DEV`).
 > - MySQL-backed shared `express-rate-limit` store (`rate_limits`), dual IP + per-mobile lookup throttling, PII/title masking against enumeration, binary JPEG/PNG magic-byte upload validation, and private evidence endpoints (`GET /api/complaints/evidence/...` with short-lived scoped tokens & `GET /api/admin/complaints/:id/evidence/...` with Panchayat-scoped cookie auth).
-> - Forward-only schema repair ([`005_repair_vgmp_schema.sql`](file:///c:/xampp/htdocs/vgmp/database/migrations/005_repair_vgmp_schema.sql) + [`005_verify_repair.sql`](file:///c:/xampp/htdocs/vgmp/database/migrations/005_verify_repair.sql)) adding `schema_migrations`, `rate_limits`, optional complaint geolocation, status history, citizen feedback/reopening, and zero-OTP signed voter-cookie community voting (`complaint_votes`), with graceful fallback (`ER_NO_SUCH_TABLE` / `ER_BAD_FIELD_ERROR`) so existing complaints continue working before and after migration.
 
 ---
 

@@ -41,12 +41,7 @@ function errorHandler(err, _req, res, _next) {
     });
   }
 
-  if (
-    err.code === 'ER_NO_SUCH_TABLE' ||
-    err.errno === 1146 ||
-    err.code === 'ER_BAD_FIELD_ERROR' ||
-    err.errno === 1054
-  ) {
+  if (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146) {
     if (env.nodeEnv !== 'test') {
       console.error('[GramSetu Schema Error]', err.code, err.message);
     }

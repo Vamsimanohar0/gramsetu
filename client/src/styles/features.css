@@ -402,10 +402,3 @@
   padding: 20px;
 }
 
-.page-admin-complaints .status-badge.assigned,
-.page-admin-dashboard .status-badge.assigned,
-.page-admin-view .status-badge.assigned {
-  background: rgba(56, 189, 248, 0.2);
-  color: #38bdf8;
-}
-

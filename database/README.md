@@ -15,24 +15,21 @@ mysql -u root -p vgmp_backup_test < vgmp_backup.sql
 
 ## 2. Using an Existing `vgmp` Database (Zero Data Loss)
 
-If your `vgmp` database already exists in MySQL/MariaDB with only the 4 original tables (`admins`, `panchayaths`, `villages`, `complaints`):
+If your `vgmp` database already exists in MySQL/MariaDB:
 - **Do NOT drop or reset the database.**
-- **Do NOT run `004_rollback_release_features.sql`** (it drops tables and columns).
-- **Safe vs. Destructive SQL:** `SELECT`, `SHOW`, `mysqldump`, `CREATE TABLE IF NOT EXISTS`, and conditional nullable `ALTER TABLE ... ADD COLUMN` are safe and preserve existing records. `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, and `DELETE` are destructive.
 - Point `server/.env` (`DB_NAME=vgmp`) directly at the existing database.
-- Apply the **forward-only schema repair migration** (`005_repair_vgmp_schema.sql`), which creates `schema_migrations`, `rate_limits`, the 5 nullable `complaints` geolocation columns, `complaint_status_history`, `complaint_feedback`, and zero-OTP `complaint_votes` in one idempotent pass:
+- Add the shared rate-limiter table (non-destructive):
   ```powershell
-  mysql -u root -p vgmp < database/migrations/005_repair_vgmp_schema.sql
+  mysql -u root -p vgmp < database/migrations/003_rate_limits_table.sql
   ```
-- Verify the repaired schema & intact complaint records (read-only):
+- Add the voting, feedback, status-history, and optional geolocation columns/tables (non-destructive & idempotent):
   ```powershell
-  mysql -u root -p vgmp < database/migrations/005_verify_repair.sql
+  mysql -u root -p vgmp < database/migrations/004_release_features.sql
+  ```
+- Run the read-only verification script:
+  ```powershell
   mysql -u root -p vgmp < database/migrations/001_verify_integrity.sql
   ```
-
-> **Note on `003` & `004`:** `005_repair_vgmp_schema.sql` supersedes manual separate execution of `003` and `004` on partially upgraded databases and records `005_repair_vgmp_schema` in `schema_migrations`.
-
----
 
 ## 3. Legacy Complaint Data Migration & Manual Review Workflow
 

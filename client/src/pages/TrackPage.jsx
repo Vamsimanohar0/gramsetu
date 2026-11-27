@@ -30,7 +30,6 @@ export default function TrackPage() {
   const [mobile, setMobile] = useState('');
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
-  const [trackError, setTrackError] = useState('');
   const [tracked, setTracked] = useState(null);
   const [activeTarget, setActiveTarget] = useState(null);
 
@@ -82,7 +81,6 @@ export default function TrackPage() {
         setLoading(true);
         setTracked(null);
         setNotFound(false);
-        setTrackError('');
         setFeedbackNotice({ type: '', text: '' });
         setVoteNotice({ type: '', text: '' });
         setRefreshError('');
@@ -144,10 +142,7 @@ export default function TrackPage() {
             setActiveTarget(null);
             setNotFound(true);
           } else {
-            setActiveTarget(null);
-            setTrackError(
-              err.message || 'Unable to fetch complaint details right now. Please try again shortly.'
-            );
+            alert(`Error fetching complaint: ${err.message}`);
           }
         } else {
           // Preserve existing loaded complaint data on background refresh failures
@@ -241,7 +236,6 @@ export default function TrackPage() {
     setMobile('');
     setTracked(null);
     setNotFound(false);
-    setTrackError('');
     setLastUpdatedAt(null);
     lastUpdatedAtRef.current = null;
     setRefreshError('');
@@ -526,16 +520,6 @@ export default function TrackPage() {
             </h3>
             <p>Please wait while we retrieve complaint details.</p>
           </div>
-        )}
-
-        {/* NON-404 ERROR STATE */}
-        {trackError && !loading && (
-          <section className="glass" id="trackErrorState" style={{ margin: '2rem 0' }}>
-            <div className="feedback-notice error" role="alert">
-              <i className="fas fa-exclamation-triangle" style={{ marginRight: '8px' }} />
-              {trackError}
-            </div>
-          </section>
         )}
 
         {/* TRACKING RESULTS */}

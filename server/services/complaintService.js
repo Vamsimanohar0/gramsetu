@@ -17,15 +17,11 @@ function isMissingOptionalTable(err) {
   return Boolean(err && (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146));
 }
 
-function isMissingColumnError(err) {
-  return Boolean(err && (err.code === 'ER_BAD_FIELD_ERROR' || err.errno === 1054));
-}
-
 function logOptionalTableWarning(err) {
   if (!warnedMissingOptionalTable && process.env.NODE_ENV !== 'test') {
     warnedMissingOptionalTable = true;
     console.warn(
-      `[GramSetu Schema Notice] Optional schema object missing (${err.message}). Apply database/migrations/005_repair_vgmp_schema.sql cleanly.`
+      `[GramSetu Schema Notice] Optional table missing (${err.message}). Apply database/migrations/004_release_features.sql for full voting/history/feedback features.`
     );
   }
 }
@@ -220,87 +216,44 @@ async function createComplaint(data, uploadedFiles = []) {
       ? toApproximateCoordinates(data.latitude, data.longitude, complaintId)
       : { approxLatitude: null, approxLongitude: null };
 
-    let insertResult;
-    try {
-      [insertResult] = await connection.execute(
-        `INSERT INTO complaints (
-          complaint_id,
-          name,
-          mobile,
-          village_id,
-          panchayath_id,
-          ward_no,
-          category,
-          title,
-          description,
-          image_path,
-          latitude,
-          longitude,
-          approx_latitude,
-          approx_longitude,
-          location_source,
-          status,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
-        [
-          complaintId,
-          data.name,
-          data.mobile,
-          data.villageId,
-          panchayathId,
-          data.wardNo,
-          data.category,
-          data.title,
-          data.description,
-          imagePathsJson,
-          hasCoords ? data.latitude : null,
-          hasCoords ? data.longitude : null,
-          approxLatitude,
-          approxLongitude,
-          hasCoords ? data.locationSource : null,
-        ]
-      );
-    } catch (insertErr) {
-      if (!isMissingColumnError(insertErr)) {
-        throw insertErr;
-      }
-      logOptionalTableWarning(insertErr);
-      if (hasCoords) {
-        const schemaErr = new Error(
-          'Location pinning requires applying database migration 005_repair_vgmp_schema.sql first, or submit without a map pin.'
-        );
-        schemaErr.statusCode = 503;
-        throw schemaErr;
-      }
-      [insertResult] = await connection.execute(
-        `INSERT INTO complaints (
-          complaint_id,
-          name,
-          mobile,
-          village_id,
-          panchayath_id,
-          ward_no,
-          category,
-          title,
-          description,
-          image_path,
-          status,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
-        [
-          complaintId,
-          data.name,
-          data.mobile,
-          data.villageId,
-          panchayathId,
-          data.wardNo,
-          data.category,
-          data.title,
-          data.description,
-          imagePathsJson,
-        ]
-      );
-    }
+    const [insertResult] = await connection.execute(
+      `INSERT INTO complaints (
+        complaint_id,
+        name,
+        mobile,
+        village_id,
+        panchayath_id,
+        ward_no,
+        category,
+        title,
+        description,
+        image_path,
+        latitude,
+        longitude,
+        approx_latitude,
+        approx_longitude,
+        location_source,
+        status,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', NOW())`,
+      [
+        complaintId,
+        data.name,
+        data.mobile,
+        data.villageId,
+        panchayathId,
+        data.wardNo,
+        data.category,
+        data.title,
+        data.description,
+        imagePathsJson,
+        hasCoords ? data.latitude : null,
+        hasCoords ? data.longitude : null,
+        approxLatitude,
+        approxLongitude,
+        hasCoords ? data.locationSource : null,
+      ]
+    );
 
     if (insertResult && insertResult.insertId) {
       try {
@@ -818,31 +771,16 @@ async function getPublicMapComplaints({ villageId = '', category = '', status = 
     params.push(trimmedStatus);
   }
 
-  let rows;
-  try {
-    [rows] = await pool.execute(
-      `SELECT c.id, c.complaint_id, c.village_id, COALESCE(v.name, c.village) AS village_name,
-              c.category, c.title, c.status, c.approx_latitude, c.approx_longitude,
-              c.created_at
-       FROM complaints c
-       LEFT JOIN villages v ON c.village_id = v.id
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY c.created_at DESC`,
-      params
-    );
-  } catch (mapErr) {
-    if (!isMissingColumnError(mapErr)) throw mapErr;
-    logOptionalTableWarning(mapErr);
-    [rows] = await pool.execute(
-      `SELECT c.id, c.complaint_id, c.village_id, COALESCE(v.name, c.village) AS village_name,
-              c.category, c.title, c.status, c.created_at
-       FROM complaints c
-       LEFT JOIN villages v ON c.village_id = v.id
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY c.created_at DESC`,
-      params
-    );
-  }
+  const [rows] = await pool.execute(
+    `SELECT c.id, c.complaint_id, c.village_id, COALESCE(v.name, c.village) AS village_name,
+            c.category, c.title, c.status, c.approx_latitude, c.approx_longitude,
+            c.created_at
+     FROM complaints c
+     LEFT JOIN villages v ON c.village_id = v.id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY c.created_at DESC`,
+    params
+  );
 
   const complaintPks = (rows || []).map((r) => r.id).filter(Boolean);
   const voteCountMap = await safeGetVoteCountsMap(complaintPks);
@@ -915,31 +853,16 @@ async function getAdminMapComplaints(panchayathId, { villageId = '', category = 
     params.push(trimmedStatus);
   }
 
-  let rows;
-  try {
-    [rows] = await pool.execute(
-      `SELECT c.id, c.complaint_id, c.name, c.village_id, COALESCE(v.name, c.village) AS village_name,
-              c.ward_no, c.category, c.title, c.status, c.latitude, c.longitude,
-              c.approx_latitude, c.approx_longitude, c.location_source, c.created_at
-       FROM complaints c
-       LEFT JOIN villages v ON c.village_id = v.id
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY c.created_at DESC`,
-      params
-    );
-  } catch (mapErr) {
-    if (!isMissingColumnError(mapErr)) throw mapErr;
-    logOptionalTableWarning(mapErr);
-    [rows] = await pool.execute(
-      `SELECT c.id, c.complaint_id, c.name, c.village_id, COALESCE(v.name, c.village) AS village_name,
-              c.ward_no, c.category, c.title, c.status, c.created_at
-       FROM complaints c
-       LEFT JOIN villages v ON c.village_id = v.id
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY c.created_at DESC`,
-      params
-    );
-  }
+  const [rows] = await pool.execute(
+    `SELECT c.id, c.complaint_id, c.name, c.village_id, COALESCE(v.name, c.village) AS village_name,
+            c.ward_no, c.category, c.title, c.status, c.latitude, c.longitude,
+            c.approx_latitude, c.approx_longitude, c.location_source, c.created_at
+     FROM complaints c
+     LEFT JOIN villages v ON c.village_id = v.id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY c.created_at DESC`,
+    params
+  );
 
   const voteCountMap = await safeGetVoteCountsMap((rows || []).map((r) => r.id));
   const complaints = rows.map((row) => formatAdminComplaintRow(row, voteCountMap));
