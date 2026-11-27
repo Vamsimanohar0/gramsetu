@@ -1,17 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { apiRequest } from '../../services/api';
-import '../../styles/admin-dashboard.css';
-
-const CHART_ITEMS = [
-  { label: 'Submitted', color: '#f9b84a' },
-  { label: 'Verified', color: '#3498db' },
-  { label: 'Assigned', color: '#38bdf8' },
-  { label: 'In Progress', color: '#7DFF6A' },
-  { label: 'Resolved', color: '#2ecc71' },
-  { label: 'Rejected', color: '#ff6b6b' },
-];
+import AdminLayout from '../../components/AdminLayout';
+import ComplaintTrendChart from '../../components/ComplaintTrendChart';
 
 function formatShortDate(dateValue) {
   if (!dateValue) return 'N/A';
@@ -20,26 +12,27 @@ function formatShortDate(dateValue) {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function formatTodayHeader() {
-  return new Date().toLocaleDateString('en-GB', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+function getCategoryIcon(category) {
+  const c = (category || '').toLowerCase();
+  if (c.includes('light')) return 'fa-lightbulb';
+  if (c.includes('road')) return 'fa-road';
+  if (c.includes('water')) return 'fa-tint';
+  if (c.includes('drain') || c.includes('garbage')) return 'fa-trash-alt';
+  if (c.includes('safety')) return 'fa-shield-alt';
+  return 'fa-clipboard-list';
 }
 
 export default function AdminDashboardPage() {
-  const { panchayath, logout } = useAuth();
+  const { panchayath } = useAuth();
   const navigate = useNavigate();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const sidebarRef = useRef(null);
-  const toggleRef = useRef(null);
+  const [statRange, setStatRange] = useState('ALL');
+  const [recentFilter, setRecentFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     document.title = `Dashboard - ${panchayath?.name || 'Panchayath'}`;
@@ -62,29 +55,6 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-  useEffect(() => {
-    const handleOutsideClick = (event) => {
-      if (window.innerWidth <= 768) {
-        if (
-          sidebarRef.current &&
-          !sidebarRef.current.contains(event.target) &&
-          toggleRef.current &&
-          !toggleRef.current.contains(event.target)
-        ) {
-          setSidebarOpen(false);
-        }
-      }
-    };
-    document.addEventListener('click', handleOutsideClick);
-    return () => document.removeEventListener('click', handleOutsideClick);
-  }, []);
-
-  const handleLogout = async (e) => {
-    e.preventDefault();
-    await logout();
-    navigate('/admin/login', { replace: true });
-  };
-
   const panchayathName = data?.panchayath?.name || panchayath?.name || 'Panchayath';
   const villages = data?.villages || [];
   const villageNames = villages.map((v) => v.name);
@@ -99,257 +69,281 @@ export default function AdminDashboardPage() {
   };
   const urgentCount = data?.urgentCount ?? (stats.Submitted || 0) + (stats.Verified || 0);
   const recentComplaints = data?.recentComplaints || [];
-  const maxCount = Math.max(
-    1,
-    stats.Submitted || 0,
-    stats.Verified || 0,
-    stats.Assigned || 0,
-    stats['In Progress'] || 0,
-    stats.Resolved || 0,
-    stats.Rejected || 0
-  );
+
+  const totalCount = Math.max(0, stats.total || 0);
+  const safeDenom = Math.max(1, totalCount);
+  const pendingTotal = (stats.Submitted || 0) + (stats.Verified || 0) + (stats.Assigned || 0);
+  const inProgressTotal = stats['In Progress'] || 0;
+  const resolvedTotal = stats.Resolved || 0;
+  const rejectedTotal = stats.Rejected || 0;
+
+  const recentInWindow =
+    statRange === 'ALL'
+      ? totalCount
+      : recentComplaints.filter((c) => {
+          const ts = c.created_at ? new Date(c.created_at).getTime() : 0;
+          const days = statRange === '7D' ? 7 : 30;
+          return ts >= Date.now() - days * 24 * 60 * 60 * 1000;
+        }).length;
+
+  const filteredRecent = recentComplaints.filter((row) => {
+    if (recentFilter === 'open') {
+      return row.status !== 'Resolved' && row.status !== 'Rejected';
+    }
+    if (recentFilter === 'closed') {
+      return row.status === 'Resolved' || row.status === 'Rejected';
+    }
+    return true;
+  });
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    navigate(q ? `/admin/complaints?search=${encodeURIComponent(q)}` : '/admin/complaints');
+  };
 
   return (
-    <div className="page-admin-dashboard">
-      <aside ref={sidebarRef} className={`sidebar${sidebarOpen ? ' open' : ''}`} id="sidebar">
-        <div className="sidebar-brand">
-          <i className="fas fa-landmark" />
-          <h2>
-            Gram<span>Setu</span>
-          </h2>
+    <AdminLayout
+      titleName={panchayathName}
+      subtitle={`Grievance overview · ${villageNames.length} villages connected`}
+      stats={stats}
+      villages={villages}
+      urgentCount={urgentCount}
+    >
+      {error && (
+        <div className="admin-alert error">
+          <i className="fas fa-exclamation-circle" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Pill Navigation Row + Search Bar */}
+      <div className="admin-toolbar-row">
+        <div className="admin-pill-tabs">
+          <Link to="/admin/dashboard" className="admin-pill active">
+            Overview
+          </Link>
+          <Link to="/admin/complaints" className="admin-pill">
+            Complaints ({totalCount})
+          </Link>
+          <Link to="/admin/map" className="admin-pill">
+            Map View
+          </Link>
         </div>
 
-        <div className="sidebar-user">
-          <div className="avatar">{panchayathName.charAt(0).toUpperCase()}</div>
-          <div className="user-info">
-            <div className="name">{panchayathName}</div>
-            <div className="role">Panchayath Admin</div>
-          </div>
-        </div>
+        <form className="admin-search-pill" onSubmit={handleSearchSubmit}>
+          <i className="fas fa-search" />
+          <input
+            type="text"
+            placeholder="Search complaints by ID, citizen, mobile..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Search complaints"
+          />
+          <button type="submit">Search</button>
+        </form>
+      </div>
 
-        <ul className="sidebar-nav">
-          <li>
-            <Link to="/admin/dashboard" className="active">
-              <i className="fas fa-chart-pie" /> Dashboard
-            </Link>
-          </li>
-          <li>
-            <Link to="/admin/complaints">
-              <i className="fas fa-list" /> All Complaints{' '}
-              <span className="badge">{stats.total || 0}</span>
-            </Link>
-          </li>
-          <li>
-            <Link to="/admin/complaints?status=Submitted">
-              <i className="fas fa-clock" /> Pending{' '}
-              <span className="badge">{stats.Submitted || 0}</span>
-            </Link>
-          </li>
-          <li>
-            <Link to="/admin/complaints?status=In%20Progress">
-              <i className="fas fa-spinner" /> In Progress{' '}
-              <span className="badge">{stats['In Progress'] || 0}</span>
-            </Link>
-          </li>
-          <li>
-            <Link to="/admin/complaints?status=Resolved">
-              <i className="fas fa-check-circle" /> Resolved{' '}
-              <span className="badge">{stats.Resolved || 0}</span>
-            </Link>
-          </li>
-          <li>
-            <Link to="/admin/map">
-              <i className="fas fa-map-marked-alt" /> Complaint Map
-            </Link>
-          </li>
-        </ul>
-
-        <div className="sidebar-logout">
-          <ul className="sidebar-nav">
-            <li>
-              <a href="#logout" onClick={handleLogout}>
-                <i className="fas fa-sign-out-alt" /> Logout
-              </a>
-            </li>
-          </ul>
-        </div>
-      </aside>
-
-      <div className="main-content">
-        <div className="top-bar">
-          <div>
-            <button
-              ref={toggleRef}
-              type="button"
-              className="mobile-toggle"
-              id="mobileToggle"
-              onClick={() => setSidebarOpen((prev) => !prev)}
-            >
-              <i className="fas fa-bars" />
-            </button>
-            <h1>
-              Dashboard <span>Overview</span>
-            </h1>
-          </div>
-          <div className="top-actions">
-            <span className="panchayath-info">
-              <i className="fas fa-university" />
-              {panchayathName}
-              {villageNames.length > 0 && (
-                <span style={{ color: '#4a5d7a', marginLeft: '5px' }}>
-                  ({villageNames.length} villages)
-                </span>
-              )}
-            </span>
-            <span className="date">
-              <i className="far fa-calendar-alt" /> {formatTodayHeader()}
-            </span>
-          </div>
-        </div>
-
-        {error && (
-          <div className="alert-banner" style={{ borderColor: 'rgba(255, 82, 82, 0.3)', background: 'rgba(255, 82, 82, 0.1)' }}>
-            <i className="fas fa-exclamation-circle" style={{ color: '#ff6b6b' }} />
-            <div className="alert-text">{error}</div>
-          </div>
-        )}
-
-        {urgentCount > 0 && (
-          <div className="alert-banner">
-            <i className="fas fa-exclamation-triangle" />
-            <div className="alert-text">
-              <strong>{urgentCount} pending complaints</strong> require your attention. Please review
-              and take action.
+      {/* 3-Column Reference Bento Grid */}
+      <div className="admin-bento-grid">
+        {/* Column 1: Total Complaints Card + Urgent Action Promo Card */}
+        <div className="admin-col-stack">
+          <section className="admin-glass-card admin-stat-hero-card">
+            <div className="admin-card-head">
+              <h2 className="admin-card-title">Total Complaints</h2>
+              <select
+                className="admin-range-select"
+                value={statRange}
+                onChange={(e) => setStatRange(e.target.value)}
+                aria-label="Complaints range"
+              >
+                <option value="ALL">All Time</option>
+                <option value="30D">30D Recent</option>
+                <option value="7D">7D Recent</option>
+              </select>
             </div>
-            <Link to="/admin/complaints?status=Submitted" className="alert-action">
-              Review Now
-            </Link>
-          </div>
-        )}
+            <div className="admin-big-metric">{loading ? '...' : recentInWindow}</div>
+            <p className="admin-metric-sub">
+              {villageNames.length > 0
+                ? `${villageNames.slice(0, 3).join(', ')}${villageNames.length > 3 ? ` +${villageNames.length - 3}` : ''}`
+                : 'Active jurisdiction'}
+            </p>
+          </section>
 
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon" style={{ color: '#7DFF6A' }}>
-              📋
-            </div>
-            <div className="stat-number">{loading ? '...' : stats.total}</div>
-            <div className="stat-label">Total Complaints</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon" style={{ color: '#f9b84a' }}>
-              ⏳
-            </div>
-            <div className="stat-number">
-              {loading ? '...' : (stats.Submitted || 0) + (stats.Verified || 0)}
-            </div>
-            <div className="stat-label">Pending Review</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon" style={{ color: '#3498db' }}>
-              🔄
-            </div>
-            <div className="stat-number">{loading ? '...' : stats['In Progress'] || 0}</div>
-            <div className="stat-label">In Progress</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon" style={{ color: '#2ecc71' }}>
-              ✅
-            </div>
-            <div className="stat-number">{loading ? '...' : stats.Resolved || 0}</div>
-            <div className="stat-label">Resolved</div>
-            {villageNames.length > 0 && (
-              <div className="villages-list">
-                <i className="fas fa-map-marker-alt" />{' '}
-                {villageNames.slice(0, 3).join(', ')}
-                {villageNames.length > 3 ? ` +${villageNames.length - 3} more` : ''}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="chart-section">
-          <h3>
-            <i className="fas fa-chart-bar" style={{ color: '#7DFF6A' }} /> Complaint Status
-            Distribution
-          </h3>
-          <div className="chart-bars">
-            {CHART_ITEMS.map((item) => {
-              const count = stats[item.label] || 0;
-              const height = (count / maxCount) * 180;
-              return (
-                <div key={item.label} className="chart-bar-container">
-                  <div className="chart-bar-value">{count}</div>
-                  <div
-                    className="chart-bar"
-                    style={{ height: `${Math.max(height, 10)}px`, background: item.color }}
-                  />
-                  <div className="chart-bar-label">{item.label}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="recent-section">
-          <div className="header">
+          <section className="admin-glass-card admin-insight-card">
             <h3>
-              <i className="fas fa-clock" style={{ color: '#7DFF6A' }} /> Recent Complaints
+              {urgentCount > 0 ? 'Pending Panchayat Review' : 'Jurisdiction Up to Date'}
             </h3>
-            <Link to="/admin/complaints">View All →</Link>
+            <p>
+              {urgentCount > 0
+                ? `${urgentCount} submitted or verified complaints require Panchayat inspection and status updates.`
+                : 'No urgent pending complaints right now. View all complaints or explore the village map.'}
+            </p>
+            <Link
+              to={urgentCount > 0 ? '/admin/complaints?status=Submitted' : '/admin/map'}
+              className="admin-cta-btn"
+            >
+              <span>{urgentCount > 0 ? 'Review Pending' : 'Open Complaint Map'}</span>
+              <i className="fas fa-arrow-right" />
+            </Link>
+          </section>
+        </div>
+
+        {/* Column 2: Watchlist-Style Recent Complaints List */}
+        <section className="admin-glass-card">
+          <div className="admin-card-head">
+            <h2 className="admin-card-title">Recent Complaints</h2>
+            <Link to="/admin/complaints" className="admin-mini-pill">
+              View All
+            </Link>
+          </div>
+
+          <div className="admin-watchlist-filters">
+            <button
+              type="button"
+              className={`admin-mini-pill${recentFilter === 'all' ? ' active' : ''}`}
+              onClick={() => setRecentFilter('all')}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              className={`admin-mini-pill${recentFilter === 'open' ? ' active' : ''}`}
+              onClick={() => setRecentFilter('open')}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              className={`admin-mini-pill${recentFilter === 'closed' ? ' active' : ''}`}
+              onClick={() => setRecentFilter('closed')}
+            >
+              Closed
+            </button>
           </div>
 
           {loading ? (
-            <div className="empty-state">
-              <i className="fas fa-spinner fa-spin" />
-              <p>Loading recent complaints...</p>
+            <p className="admin-metric-sub">Loading recent complaints...</p>
+          ) : filteredRecent.length > 0 ? (
+            <div className="admin-watchlist-items">
+              {filteredRecent.slice(0, 5).map((row) => {
+                const isRejected = row.status === 'Rejected';
+                const isResolved = row.status === 'Resolved';
+                const deltaClass = isRejected ? 'negative' : isResolved ? 'positive' : 'neutral';
+                return (
+                  <Link
+                    key={row.id}
+                    to={`/admin/complaints/${row.id}`}
+                    className="admin-watchlist-row"
+                  >
+                    <div className="admin-watchlist-left">
+                      <span className="admin-row-icon">
+                        <i className={`fas ${getCategoryIcon(row.category)}`} />
+                      </span>
+                      <div className="admin-row-text">
+                        <strong>{row.title || row.category || row.complaint_id}</strong>
+                        <small>
+                          {row.village || 'N/A'} · {formatShortDate(row.created_at)}
+                        </small>
+                      </div>
+                    </div>
+                    <div className="admin-watchlist-right">
+                      <span className="row-id">{row.complaint_id}</span>
+                      <span className={`admin-delta ${deltaClass}`}>{row.status}</span>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
-          ) : recentComplaints.length > 0 ? (
-            <table className="complaint-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Citizen</th>
-                  <th>Village</th>
-                  <th>Category</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentComplaints.map((row) => {
-                  const statusClass = (row.status || '').toLowerCase().replace(/\s+/g, '-');
-                  return (
-                    <tr key={row.id}>
-                      <td>
-                        <strong>{row.complaint_id}</strong>
-                      </td>
-                      <td>{row.name}</td>
-                      <td>{row.village || 'N/A'}</td>
-                      <td>{row.category}</td>
-                      <td>
-                        <span className={`status-badge ${statusClass}`}>{row.status}</span>
-                      </td>
-                      <td>{formatShortDate(row.created_at)}</td>
-                      <td>
-                        <Link to={`/admin/complaints/${row.id}`} className="view-btn">
-                          View
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           ) : (
-            <div className="empty-state">
-              <i className="fas fa-inbox" />
-              <p>No complaints from your villages yet.</p>
-            </div>
+            <p className="admin-metric-sub">No complaints in this filter yet.</p>
           )}
-        </div>
+        </section>
+
+        {/* Column 3: 2x2 Mini-Card Status Breakdown */}
+        <section className="admin-glass-card">
+          <div className="admin-card-head">
+            <h2 className="admin-card-title">Status Breakdown</h2>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <Link to="/admin/complaints" className="admin-mini-pill">
+                See all
+              </Link>
+              <Link to="/admin/complaints" className="admin-mini-pill" aria-label="Open list">
+                ↗
+              </Link>
+            </div>
+          </div>
+
+          <div className="admin-mini-grid">
+            <Link to="/admin/complaints?status=Submitted" className="admin-mini-card">
+              <div>
+                <div className="admin-mini-value">{loading ? '...' : pendingTotal}</div>
+                <span className="admin-delta neutral">
+                  {Math.round((pendingTotal / safeDenom) * 100)}% queue
+                </span>
+              </div>
+              <div className="admin-mini-footer">
+                <div className="admin-mini-icon-label">
+                  <i className="far fa-clock" />
+                  <span>Pending</span>
+                </div>
+                <span className="admin-mini-units">Cases {pendingTotal}</span>
+              </div>
+            </Link>
+
+            <Link to="/admin/complaints?status=In%20Progress" className="admin-mini-card">
+              <div>
+                <div className="admin-mini-value">{loading ? '...' : inProgressTotal}</div>
+                <span className="admin-delta positive">
+                  {Math.round((inProgressTotal / safeDenom) * 100)}% active
+                </span>
+              </div>
+              <div className="admin-mini-footer">
+                <div className="admin-mini-icon-label">
+                  <i className="fas fa-tasks" />
+                  <span>In Progress</span>
+                </div>
+                <span className="admin-mini-units">Cases {inProgressTotal}</span>
+              </div>
+            </Link>
+
+            <Link to="/admin/complaints?status=Resolved" className="admin-mini-card">
+              <div>
+                <div className="admin-mini-value">{loading ? '...' : resolvedTotal}</div>
+                <span className="admin-delta positive">
+                  +{Math.round((resolvedTotal / safeDenom) * 100)}% solved
+                </span>
+              </div>
+              <div className="admin-mini-footer">
+                <div className="admin-mini-icon-label">
+                  <i className="far fa-check-circle" />
+                  <span>Resolved</span>
+                </div>
+                <span className="admin-mini-units">Cases {resolvedTotal}</span>
+              </div>
+            </Link>
+
+            <Link to="/admin/complaints?status=Rejected" className="admin-mini-card">
+              <div>
+                <div className="admin-mini-value">{loading ? '...' : rejectedTotal}</div>
+                <span className="admin-delta negative">
+                  {Math.round((rejectedTotal / safeDenom) * 100)}% closed
+                </span>
+              </div>
+              <div className="admin-mini-footer">
+                <div className="admin-mini-icon-label">
+                  <i className="far fa-times-circle" />
+                  <span>Rejected</span>
+                </div>
+                <span className="admin-mini-units">Cases {rejectedTotal}</span>
+              </div>
+            </Link>
+          </div>
+        </section>
       </div>
-    </div>
+
+      {/* Full-Width Interactive Area Chart */}
+      <ComplaintTrendChart complaints={recentComplaints} stats={stats} />
+    </AdminLayout>
   );
 }
-
