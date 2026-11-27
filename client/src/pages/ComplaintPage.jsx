@@ -166,25 +166,35 @@ export default function ComplaintPage() {
       });
     };
 
+    // recognition.onerror = (event) => {
+    //   setIsListening(false);
+    //   const errCode = event?.error || '';
+    //   if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+    //     const msg = 'Microphone permission was denied. Allow mic access or type manually.';
+    //     setVoiceNotice(msg);
+    //     showToast(msg);
+    //   } else if (errCode === 'language-not-supported') {
+    //     const msg = `Selected voice language (${voiceLang === 'te-IN' ? 'Telugu' : 'English'}) is not supported by this browser. Try English or type manually.`;
+    //     setVoiceNotice(msg);
+    //     showToast(msg);
+    //   } else if (errCode === 'no-speech') {
+    //     setVoiceNotice('No speech detected. Speak clearly and try again, or type manually.');
+    //   } else if (errCode === 'audio-capture') {
+    //     setVoiceNotice('No microphone detected on this device. Please type your complaint.');
+    //   } else {
+    //     setVoiceNotice('Voice recognition stopped due to an error. You can continue typing manually.');
+    //   }
+    // };
     recognition.onerror = (event) => {
-      setIsListening(false);
-      const errCode = event?.error || '';
-      if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
-        const msg = 'Microphone permission was denied. Allow mic access or type manually.';
-        setVoiceNotice(msg);
-        showToast(msg);
-      } else if (errCode === 'language-not-supported') {
-        const msg = `Selected voice language (${voiceLang === 'te-IN' ? 'Telugu' : 'English'}) is not supported by this browser. Try English or type manually.`;
-        setVoiceNotice(msg);
-        showToast(msg);
-      } else if (errCode === 'no-speech') {
-        setVoiceNotice('No speech detected. Speak clearly and try again, or type manually.');
-      } else if (errCode === 'audio-capture') {
-        setVoiceNotice('No microphone detected on this device. Please type your complaint.');
-      } else {
-        setVoiceNotice('Voice recognition stopped due to an error. You can continue typing manually.');
-      }
-    };
+  console.error('GRAMSETU SPEECH ERROR:', event.error);
+  console.error('SPEECH ERROR DETAILS:', event);
+
+  setIsListening(false);
+
+  setVoiceNotice(
+    `Voice recognition error: ${event.error}. Please try again or type manually.`
+  );
+};
 
     recognition.onend = () => {
       setIsListening(false);
@@ -198,11 +208,21 @@ export default function ComplaintPage() {
       setVoiceNotice(
         `Listening in ${voiceLang === 'te-IN' ? 'తెలుగు (te-IN)' : 'English (en-IN)'}... Click Stop when finished. Review before submitting.`
       );
-    } catch {
-      recognitionRef.current = null;
-      setIsListening(false);
-      showToast('Microphone error, please try again or type manually.');
-    }
+      } catch (error) {
+  console.error('GRAMSETU SPEECH START ERROR:', error);
+
+  recognitionRef.current = null;
+  setIsListening(false);
+
+  setVoiceNotice(
+    `Could not start microphone: ${error.message}`
+  );
+}
+    // } catch {
+    //   recognitionRef.current = null;
+    //   setIsListening(false);
+    //   showToast('Microphone error, please try again or type manually.');
+    // }
   };
 
   const resetFormState = () => {
